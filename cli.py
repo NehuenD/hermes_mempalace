@@ -59,6 +59,12 @@ def register_cli(subparsers) -> None:
     )
     mine_parser.add_argument("--wing", help="Wing name to tag mined content")
 
+    memories_parser = sub.add_parser("memories", help="List all stored memories")
+    memories_parser.add_argument("--wing", help="Filter by wing")
+    memories_parser.add_argument(
+        "--limit", type=int, default=50, help="Max memories to show"
+    )
+
     subparsers.set_defaults(func=mempalace_command)
 
 
@@ -81,8 +87,12 @@ def mempalace_command(args) -> int:
         return cmd_init(args)
     elif cmd == "mine":
         return cmd_mine(args)
+    elif cmd == "memories":
+        return cmd_memories(args)
     else:
-        print("Usage: hermes mempalace {setup,status,init,mine,enable,disable}")
+        print(
+            "Usage: hermes mempalace {setup,status,init,mine,memories,enable,disable}"
+        )
         return 1
 
 
@@ -291,6 +301,83 @@ def cmd_mine(args) -> int:
         if result.stderr:
             print(result.stderr, file=sys.stderr)
         return result.returncode
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_memories(args) -> int:
+    """List all stored memories."""
+    try:
+        from mempalace.config import MempalaceConfig
+        import chromadb
+    except ImportError:
+        print("ERROR: mempalace not installed")
+        print("Install: pip install mempalace")
+        return 1
+
+    config = MempalaceConfig()
+    palace_path = Path(config.palace_path)
+    collection_name = config.collection_name
+    wing_filter = getattr(args, "wing", None)
+    limit = getattr(args, "limit", 50)
+
+    if not palace_path.exists():
+        print("ERROR: Palace not initialized. Run: mempalace init <dir>")
+        return 1
+
+    try:
+        client = chromadb.PersistentClient(path=str(palace_path))
+        collection = client.get_collection(collection_name)
+        count = collection.count()
+
+        print("=" * 50)
+        print("MemPalace Memories")
+        print("=" * 50)
+        print(f"Total: {count} memories")
+        if wing_filter:
+            print(f"Filter: wing={wing_filter}")
+        print()
+
+        if count == 0:
+            print("No memories stored yet.")
+            print("Tell Hermes to 'remember' something to add memories.")
+            return 0
+
+        all_data = collection.get(include=["documents", "metadatas"])
+        docs = all_data.get("documents") or []
+        metas = all_data.get("metadatas") or []
+        memories = []
+        for i, doc in enumerate(docs):
+            meta = metas[i] if i < len(metas) else {}
+            wing = meta.get("wing", "unknown")
+            if wing_filter and wing != wing_filter:
+                continue
+            room = meta.get("room", "general")
+            closet = meta.get("closet", "hall_events")
+            memories.append(
+                {
+                    "doc": doc,
+                    "wing": wing,
+                    "room": room,
+                    "closet": closet,
+                }
+            )
+
+        for i, mem in enumerate(memories[:limit]):
+            print(
+                f"{i + 1}. {mem['doc'][:150]}{'...' if len(mem['doc']) > 150 else ''}"
+            )
+            print(
+                f"   Wing: {mem['wing']} | Room: {mem['room']} | Closet: {mem['closet']}"
+            )
+            print()
+
+        if len(memories) > limit:
+            print(f"... and {len(memories) - limit} more memories")
+            print(f"Use --limit {len(memories)} to see all")
+
+        return 0
     except Exception as e:
         print(f"Error: {e}")
         return 1
