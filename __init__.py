@@ -539,21 +539,39 @@ class MempalaceMemoryProvider(MemoryProvider):
             return False
 
     def system_prompt_block(self) -> str:
+        aaak_guide = """## AAAK Compression Dialect
+AAAK (Autonomous Autonomous Autonomous Knowledge) is a 30x lossless shorthand format.
+Use structured shorthand to store memories compactly:
+
+Format: ENTITY → entity|topic_codes|"key_quote"|flags
+Example: AUTH_DB → Postgres|db,migration|reason:reliable|decision
+Example: KAI → pref:detailed.reviews|team|preference
+Example: ORION → project,jovovich|architecture,goals|project
+
+FLAGS: DECISION, CORE, SENSITIVE, TECHNICAL, PIVOT
+
+When storing via mempalace_add_drawer or mempalace_remember, prefer AAAK shorthand
+when content exceeds 100 words. Store raw text for short items, AAAK for long summaries."""
+
         if self._wake_up_context:
             return (
                 "# MemPalace Memory\n"
                 f"{self._wake_up_context}\n\n"
                 "When user asks to 'remember' something, use mempalace_remember.\n"
                 "Use mempalace_search to find stored memories.\n"
-                "Use mempalace_add_drawer for explicit file storage.\n"
-                "Use mempalace_kg_add for structured facts (subject-predicate-object triples)."
+                "Use mempalace_add_drawer with AAAK shorthand for long content.\n"
+                "Use mempalace_kg_add for structured facts (subject-predicate-object triples).\n"
+                "Use mempalace_diary_write in AAAK format for agent observations.\n\n"
+                + aaak_guide
             )
         return (
             "# MemPalace Memory\n"
-            "MemPalace is your persistent memory. It stores facts, preferences, and decisions.\n"
-            "When user asks to 'remember' something, use mempalace_remember immediately.\n"
-            "Use mempalace_search to find previously stored information.\n"
-            "Use mempalace_kg_add for structured knowledge graph facts."
+            "MemPalace is your persistent memory with palace structure (Wings/Rooms).\n"
+            "When user asks to 'remember', use mempalace_remember.\n"
+            "Use mempalace_search to find information.\n"
+            "Use mempalace_kg_add for structured facts.\n"
+            "Use mempalace_diary_write in AAAK shorthand for observations.\n\n"
+            + aaak_guide
         )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
