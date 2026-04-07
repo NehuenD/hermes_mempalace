@@ -115,12 +115,13 @@ Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 ## CLI Commands
 
 ```bash
-hermes mempalace setup      # Interactive setup wizard
-hermes mempalace status     # Show palace overview
-hermes mempalace init <dir> # Initialize new palace
-hermes mempalace mine <dir> # Mine data into palace
-hermes mempalace enable     # Enable plugin
-hermes mempalace disable    # Disable plugin
+hermes mempalace setup        # Interactive setup wizard
+hermes mempalace status       # Show palace overview
+hermes mempalace memories     # List all stored memories
+hermes mempalace init <dir>   # Initialize new palace
+hermes mempalace mine <dir>   # Mine data into palace
+hermes mempalace enable       # Enable plugin
+hermes mempalace disable      # Disable plugin
 ```
 
 ## Memory Architecture
