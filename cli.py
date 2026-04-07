@@ -23,13 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 def register_cli(subparsers) -> None:
-    """Register CLI subcommands."""
-    parser = subparsers.add_parser(
-        "mempalace",
-        help="Manage MemPalace memory plugin",
-        description="MemPalace — local-first AI memory with palace structure",
-    )
-    sub = parser.add_subparsers(dest="mempalace_cmd", help="MemPalace commands")
+    """Register CLI subcommands.
+
+    Note: subparsers is actually the parent parser for 'mempalace' that was
+    already created by main.py. We add our subcommands directly to it.
+    """
+    sub = subparsers.add_subparsers(dest="mempalace_cmd", help="MemPalace commands")
 
     sub.add_parser("setup", help="Interactive setup wizard")
     sub.add_parser("status", help="Show palace overview")
