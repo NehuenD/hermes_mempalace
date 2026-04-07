@@ -194,6 +194,30 @@ DELETE_DRAWER_SCHEMA = {
     },
 }
 
+REMEMBER_SCHEMA = {
+    "name": "mempalace_remember",
+    "description": (
+        "Store an important fact, preference, or decision in MemPalace memory. "
+        "Use this when the user asks to 'remember' something. "
+        "Automatically organizes into the palace structure (wings/rooms). "
+        "Content is stored verbatim and semantically searchable."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "What to remember — a fact, preference, decision, or important detail.",
+            },
+            "category": {
+                "type": "string",
+                "description": "Category hint: 'fact', 'preference', 'decision', 'person', 'project' (default: auto-detect).",
+            },
+        },
+        "required": ["content"],
+    },
+}
+
 KG_QUERY_SCHEMA = {
     "name": "mempalace_kg_query",
     "description": (
@@ -370,6 +394,7 @@ ALL_TOOL_SCHEMAS = [
     GRAPH_STATS_SCHEMA,
     DIARY_WRITE_SCHEMA,
     DIARY_READ_SCHEMA,
+    REMEMBER_SCHEMA,
 ]
 
 
@@ -518,14 +543,17 @@ class MempalaceMemoryProvider(MemoryProvider):
             return (
                 "# MemPalace Memory\n"
                 f"{self._wake_up_context}\n\n"
-                "Use mempalace_search to find memories, mempalace_add_drawer to store content, "
-                "mempalace_kg_add for structured facts, mempalace_diary_write for agent diary."
+                "When user asks to 'remember' something, use mempalace_remember.\n"
+                "Use mempalace_search to find stored memories.\n"
+                "Use mempalace_add_drawer for explicit file storage.\n"
+                "Use mempalace_kg_add for structured facts (subject-predicate-object triples)."
             )
         return (
             "# MemPalace Memory\n"
-            "Local-first AI memory with palace structure. "
-            "Use mempalace_search to find memories, mempalace_add_drawer to store content, "
-            "mempalace_kg_add for structured facts, mempalace_diary_write for agent diary."
+            "MemPalace is your persistent memory. It stores facts, preferences, and decisions.\n"
+            "When user asks to 'remember' something, use mempalace_remember immediately.\n"
+            "Use mempalace_search to find previously stored information.\n"
+            "Use mempalace_kg_add for structured knowledge graph facts."
         )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
@@ -676,6 +704,8 @@ class MempalaceMemoryProvider(MemoryProvider):
                 return self._tool_get_aaak_spec()
             elif tool_name == "mempalace_add_drawer":
                 return self._tool_add_drawer(args)
+            elif tool_name == "mempalace_remember":
+                return self._tool_remember(args)
             elif tool_name == "mempalace_delete_drawer":
                 return self._tool_delete_drawer(args)
             elif tool_name == "mempalace_kg_query":
@@ -845,6 +875,71 @@ class MempalaceMemoryProvider(MemoryProvider):
                 ids=[doc_id],
             )
             return json.dumps({"result": "Drawer added", "drawer_id": doc_id})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_remember(self, args: dict) -> str:
+        """Intuitive remember tool - stores content with auto-detected categorization."""
+        if not self._ensure_palace():
+            return json.dumps(
+                {"error": "Palace not initialized. Run: mempalace init <dir>"}
+            )
+
+        try:
+            import uuid
+
+            content = args.get("content", "")
+            category = args.get("category", "")
+
+            if not content:
+                return json.dumps({"error": "content is required"})
+
+            content_lower = content.lower()
+
+            if category == "preference" or any(
+                w in content_lower for w in ["prefer", "like", "dislike", "favor"]
+            ):
+                room = "preferences"
+                closet = "hall_preferences"
+            elif category == "decision" or any(
+                w in content_lower for w in ["decided", "chose", "decision", "will"]
+            ):
+                room = "decisions"
+                closet = "hall_facts"
+            elif category == "person" or any(
+                w in content_lower for w in ["works on", "responsible", "owns"]
+            ):
+                room = "people"
+                closet = "hall_facts"
+            elif category == "project" or any(
+                w in content_lower for w in ["project", "building", "creating"]
+            ):
+                room = "projects"
+                closet = "hall_events"
+            else:
+                room = "general"
+                closet = "hall_events"
+
+            doc_id = str(uuid.uuid4())
+            self._collection.add(
+                documents=[content],
+                metadatas=[
+                    {
+                        "wing": self._default_wing,
+                        "room": room,
+                        "closet": closet,
+                    }
+                ],
+                ids=[doc_id],
+            )
+            return json.dumps(
+                {
+                    "result": "Remembered",
+                    "drawer_id": doc_id,
+                    "room": room,
+                    "closet": closet,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
