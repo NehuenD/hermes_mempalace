@@ -71,7 +71,7 @@ hermes mempalace status
 
 Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 
-## Available Tools (19 total)
+## Available Tools (20 total)
 
 ### Read Tools
 | Tool | Description |
@@ -89,6 +89,7 @@ Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 |------|-------------|
 | `mempalace_add_drawer` | File verbatim content |
 | `mempalace_delete_drawer` | Remove by ID |
+| `mempalace_remember` | Remember with auto-extraction (uses general_extractor) |
 
 ### Knowledge Graph Tools
 | Tool | Description |
@@ -118,6 +119,7 @@ Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 hermes mempalace setup        # Interactive setup wizard
 hermes mempalace status       # Show palace overview
 hermes mempalace memories     # List all stored memories
+hermes mempalace wings        # List all wings and their rooms
 hermes mempalace init <dir>   # Initialize new palace
 hermes mempalace mine <dir>   # Mine data into palace
 hermes mempalace enable       # Enable plugin

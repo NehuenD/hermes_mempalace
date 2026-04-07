@@ -539,21 +539,39 @@ class MempalaceMemoryProvider(MemoryProvider):
             return False
 
     def system_prompt_block(self) -> str:
+        aaak_guide = """## AAAK Compression Dialect
+AAAK (Autonomous Autonomous Autonomous Knowledge) is a 30x lossless shorthand format.
+Use structured shorthand to store memories compactly:
+
+Format: ENTITY → entity|topic_codes|"key_quote"|flags
+Example: AUTH_DB → Postgres|db,migration|reason:reliable|decision
+Example: KAI → pref:detailed.reviews|team|preference
+Example: ORION → project,jovovich|architecture,goals|project
+
+FLAGS: DECISION, CORE, SENSITIVE, TECHNICAL, PIVOT
+
+When storing via mempalace_add_drawer or mempalace_remember, prefer AAAK shorthand
+when content exceeds 100 words. Store raw text for short items, AAAK for long summaries."""
+
         if self._wake_up_context:
             return (
                 "# MemPalace Memory\n"
                 f"{self._wake_up_context}\n\n"
                 "When user asks to 'remember' something, use mempalace_remember.\n"
                 "Use mempalace_search to find stored memories.\n"
-                "Use mempalace_add_drawer for explicit file storage.\n"
-                "Use mempalace_kg_add for structured facts (subject-predicate-object triples)."
+                "Use mempalace_add_drawer with AAAK shorthand for long content.\n"
+                "Use mempalace_kg_add for structured facts (subject-predicate-object triples).\n"
+                "Use mempalace_diary_write in AAAK format for agent observations.\n\n"
+                + aaak_guide
             )
         return (
             "# MemPalace Memory\n"
-            "MemPalace is your persistent memory. It stores facts, preferences, and decisions.\n"
-            "When user asks to 'remember' something, use mempalace_remember immediately.\n"
-            "Use mempalace_search to find previously stored information.\n"
-            "Use mempalace_kg_add for structured knowledge graph facts."
+            "MemPalace is your persistent memory with palace structure (Wings/Rooms).\n"
+            "When user asks to 'remember', use mempalace_remember.\n"
+            "Use mempalace_search to find information.\n"
+            "Use mempalace_kg_add for structured facts.\n"
+            "Use mempalace_diary_write in AAAK shorthand for observations.\n\n"
+            + aaak_guide
         )
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
@@ -879,7 +897,12 @@ class MempalaceMemoryProvider(MemoryProvider):
             return json.dumps({"error": str(e)})
 
     def _tool_remember(self, args: dict) -> str:
-        """Intuitive remember tool - stores content with auto-detected categorization."""
+        """Remember tool - extracts structured memories using mempalace's general_extractor.
+
+        Uses LLM-free pattern matching to extract decisions, preferences, milestones,
+        problems, and emotional moments. Naturally deduplicates by extracting the
+        ESSENCE rather than storing raw conversation.
+        """
         if not self._ensure_palace():
             return json.dumps(
                 {"error": "Palace not initialized. Run: mempalace init <dir>"}
@@ -887,57 +910,112 @@ class MempalaceMemoryProvider(MemoryProvider):
 
         try:
             import uuid
+            from mempalace.general_extractor import extract_memories
 
             content = args.get("content", "")
-            category = args.get("category", "")
 
             if not content:
                 return json.dumps({"error": "content is required"})
 
-            content_lower = content.lower()
+            extracted = extract_memories(content)
 
-            if category == "preference" or any(
-                w in content_lower for w in ["prefer", "like", "dislike", "favor"]
-            ):
-                room = "preferences"
-                closet = "hall_preferences"
-            elif category == "decision" or any(
-                w in content_lower for w in ["decided", "chose", "decision", "will"]
-            ):
-                room = "decisions"
-                closet = "hall_facts"
-            elif category == "person" or any(
-                w in content_lower for w in ["works on", "responsible", "owns"]
-            ):
-                room = "people"
-                closet = "hall_facts"
-            elif category == "project" or any(
-                w in content_lower for w in ["project", "building", "creating"]
-            ):
-                room = "projects"
-                closet = "hall_events"
-            else:
+            if not extracted:
+                closet_map = {
+                    "preference": "hall_preferences",
+                    "decision": "hall_facts",
+                    "milestone": "hall_discoveries",
+                    "problem": "hall_discoveries",
+                    "emotional": "hall_events",
+                }
+
                 room = "general"
                 closet = "hall_events"
+                category = args.get("category", "")
+                content_lower = content.lower()
 
-            doc_id = str(uuid.uuid4())
-            self._collection.add(
-                documents=[content],
-                metadatas=[
+                if category in closet_map:
+                    room = category
+                    closet = closet_map[category]
+                elif any(
+                    w in content_lower for w in ["prefer", "like", "dislike", "favor"]
+                ):
+                    room = "preferences"
+                    closet = "hall_preferences"
+                elif any(
+                    w in content_lower for w in ["decided", "chose", "decision", "will"]
+                ):
+                    room = "decisions"
+                    closet = "hall_facts"
+                elif any(
+                    w in content_lower for w in ["works on", "responsible", "owns"]
+                ):
+                    room = "people"
+                    closet = "hall_facts"
+
+                doc_id = str(uuid.uuid4())
+                self._collection.add(
+                    documents=[content],
+                    metadatas=[
+                        {
+                            "wing": self._default_wing,
+                            "room": room,
+                            "closet": closet,
+                        }
+                    ],
+                    ids=[doc_id],
+                )
+                return json.dumps(
                     {
-                        "wing": self._default_wing,
+                        "result": "Remembered",
+                        "drawer_id": doc_id,
                         "room": room,
                         "closet": closet,
+                        "extracted": False,
                     }
-                ],
-                ids=[doc_id],
-            )
+                )
+
+            room_map = {
+                "preference": ("preferences", "hall_preferences"),
+                "decision": ("decisions", "hall_facts"),
+                "milestone": ("milestones", "hall_discoveries"),
+                "problem": ("problems", "hall_discoveries"),
+                "emotional": ("emotional", "hall_events"),
+            }
+
+            stored = []
+            for chunk in extracted:
+                memory_type = chunk.get("memory_type", "general")
+                room, closet = room_map.get(memory_type, ("general", "hall_events"))
+
+                doc_id = str(uuid.uuid4())
+                self._collection.add(
+                    documents=[chunk["content"]],
+                    metadatas=[
+                        {
+                            "wing": self._default_wing,
+                            "room": room,
+                            "closet": closet,
+                            "memory_type": memory_type,
+                        }
+                    ],
+                    ids=[doc_id],
+                )
+                stored.append({"type": memory_type, "drawer_id": doc_id})
+
             return json.dumps(
                 {
                     "result": "Remembered",
-                    "drawer_id": doc_id,
-                    "room": room,
-                    "closet": closet,
+                    "extracted": True,
+                    "memories": stored,
+                    "count": len(stored),
+                }
+            )
+
+        except ImportError:
+            return json.dumps(
+                {
+                    "error": "general_extractor not available, falling back to raw storage",
+                    "fallback": True,
                 }
             )
         except Exception as e:

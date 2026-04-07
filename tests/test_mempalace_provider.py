@@ -60,12 +60,13 @@ class TestMempalaceProvider:
     def test_get_tool_schemas(self):
         provider = MempalaceMemoryProvider()
         schemas = provider.get_tool_schemas()
-        assert len(schemas) == 19
+        assert len(schemas) == 20
         tool_names = {s["name"] for s in schemas}
         assert "mempalace_status" in tool_names
         assert "mempalace_search" in tool_names
         assert "mempalace_kg_add" in tool_names
         assert "mempalace_diary_write" in tool_names
+        assert "mempalace_remember" in tool_names
 
     def test_system_prompt_block(self):
         provider = MempalaceMemoryProvider()
