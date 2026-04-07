@@ -65,6 +65,8 @@ def register_cli(subparsers) -> None:
         "--limit", type=int, default=50, help="Max memories to show"
     )
 
+    wings_parser = sub.add_parser("wings", help="List all wings and their rooms")
+
     subparsers.set_defaults(func=mempalace_command)
 
 
@@ -89,9 +91,11 @@ def mempalace_command(args) -> int:
         return cmd_mine(args)
     elif cmd == "memories":
         return cmd_memories(args)
+    elif cmd == "wings":
+        return cmd_wings(args)
     else:
         print(
-            "Usage: hermes mempalace {setup,status,init,mine,memories,enable,disable}"
+            "Usage: hermes mempalace {setup,status,init,mine,memories,wings,enable,disable}"
         )
         return 1
 
@@ -376,6 +380,68 @@ def cmd_memories(args) -> int:
         if len(memories) > limit:
             print(f"... and {len(memories) - limit} more memories")
             print(f"Use --limit {len(memories)} to see all")
+
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_wings(args) -> int:
+    """List all wings and their rooms."""
+    try:
+        from mempalace.config import MempalaceConfig
+        import chromadb
+    except ImportError:
+        print("ERROR: mempalace not installed")
+        print("Install: pip install mempalace")
+        return 1
+
+    config = MempalaceConfig()
+    palace_path = Path(config.palace_path)
+    collection_name = config.collection_name
+
+    if not palace_path.exists():
+        print("ERROR: Palace not initialized. Run: mempalace init <dir>")
+        return 1
+
+    try:
+        client = chromadb.PersistentClient(path=str(palace_path))
+        collection = client.get_collection(collection_name)
+        count = collection.count()
+
+        print("=" * 50)
+        print("MemPalace Wings & Rooms")
+        print("=" * 50)
+        print(f"Total: {count} memories across all wings")
+        print()
+
+        if count == 0:
+            print("No memories stored yet.")
+            return 0
+
+        all_data = collection.get(include=["metadatas"])
+        wings = {}
+        for meta in all_data.get("metadatas") or []:
+            wing = meta.get("wing", "unknown")
+            room = meta.get("room", "unknown")
+            closet = meta.get("closet", "unknown")
+
+            if wing not in wings:
+                wings[wing] = {}
+            if room not in wings[wing]:
+                wings[wing][room] = {"count": 0, "closets": set()}
+            wings[wing][room]["count"] += 1
+            wings[wing][room]["closets"].add(closet)
+
+        for wing, rooms in sorted(wings.items()):
+            print(f"📁 {wing}")
+            total_in_wing = sum(r["count"] for r in rooms.values())
+            print(f"   Total: {total_in_wing} memories")
+            for room, info in sorted(rooms.items()):
+                closets = ", ".join(sorted(info["closets"]))
+                print(f"   ├── {room}: {info['count']} memories ({closets})")
+            print()
 
         return 0
     except Exception as e:

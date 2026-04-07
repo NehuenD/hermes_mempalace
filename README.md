@@ -118,6 +118,7 @@ Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 hermes mempalace setup        # Interactive setup wizard
 hermes mempalace status       # Show palace overview
 hermes mempalace memories     # List all stored memories
+hermes mempalace wings        # List all wings and their rooms
 hermes mempalace init <dir>   # Initialize new palace
 hermes mempalace mine <dir>   # Mine data into palace
 hermes mempalace enable       # Enable plugin
