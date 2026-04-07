@@ -179,7 +179,7 @@ def cmd_status(args) -> int:
         print(f"Palace path: {palace_path}")
         print(f"Collection: {collection_name}")
 
-        palace_dir = palace_path / "palace"
+        palace_dir = palace_path  # palace_path already includes /palace
         if not palace_dir.exists():
             print()
             print("ERROR: Palace not initialized")
