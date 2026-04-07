@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 def register_cli(subparsers) -> None:
     """Register CLI subcommands.
 
-    Note: subparsers is actually the parent parser for 'mempalace' that was
-    already created by main.py. We add our subcommands directly to it.
+    Note: subparsers is the parent parser for 'mempalace' that was
+    already created by main.py. We add our subcommands to it and set
+    mempalace_command as the default handler.
     """
     sub = subparsers.add_subparsers(dest="mempalace_cmd", help="MemPalace commands")
 
@@ -58,19 +59,24 @@ def register_cli(subparsers) -> None:
     )
     mine_parser.add_argument("--wing", help="Wing name to tag mined content")
 
+    subparsers.set_defaults(func=mempalace_command)
 
-def mempalace_command(args, config) -> int:
+
+def mempalace_command(args) -> int:
     """Main entry point for hermes mempalace command."""
+    from hermes_cli.config import load_config
+
     cmd = getattr(args, "mempalace_cmd", None)
+    config = load_config()
 
     if cmd == "setup":
-        return cmd_setup(config)
+        return cmd_setup(args, config)
     elif cmd == "status":
-        return cmd_status()
+        return cmd_status(args)
     elif cmd == "enable":
-        return cmd_enable(config)
+        return cmd_enable(args, config)
     elif cmd == "disable":
-        return cmd_disable(config)
+        return cmd_disable(args, config)
     elif cmd == "init":
         return cmd_init(args)
     elif cmd == "mine":
@@ -80,7 +86,7 @@ def mempalace_command(args, config) -> int:
         return 1
 
 
-def cmd_setup(config) -> int:
+def cmd_setup(args, config) -> int:
     """Interactive setup wizard."""
     print("=" * 60)
     print("MemPalace Setup Wizard")
@@ -151,7 +157,7 @@ def cmd_setup(config) -> int:
     return 0
 
 
-def cmd_status() -> int:
+def cmd_status(args) -> int:
     """Show palace overview."""
     try:
         import chromadb
@@ -210,7 +216,7 @@ def cmd_status() -> int:
         return 1
 
 
-def cmd_enable(config) -> int:
+def cmd_enable(args, config) -> int:
     """Enable MemPalace in config."""
     try:
         from hermes_cli.config import load_config, save_config
@@ -225,7 +231,7 @@ def cmd_enable(config) -> int:
         return 1
 
 
-def cmd_disable(config) -> int:
+def cmd_disable(args, config) -> int:
     """Disable MemPalace in config."""
     try:
         from hermes_cli.config import load_config, save_config
