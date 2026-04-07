@@ -897,7 +897,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_remember(self, args: dict) -> str:
-        """Intuitive remember tool - stores content with auto-detected categorization."""
+        """Remember tool - extracts structured memories using mempalace's general_extractor.
+
+        Uses LLM-free pattern matching to extract decisions, preferences, milestones,
+        problems, and emotional moments. Naturally deduplicates by extracting the
+        ESSENCE rather than storing raw conversation.
+        """
         if not self._ensure_palace():
             return json.dumps(
                 {"error": "Palace not initialized. Run: mempalace init <dir>"}
@@ -905,57 +910,112 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
         try:
             import uuid
+            from mempalace.general_extractor import extract_memories
 
             content = args.get("content", "")
-            category = args.get("category", "")
 
             if not content:
                 return json.dumps({"error": "content is required"})
 
-            content_lower = content.lower()
+            extracted = extract_memories(content)
 
-            if category == "preference" or any(
-                w in content_lower for w in ["prefer", "like", "dislike", "favor"]
-            ):
-                room = "preferences"
-                closet = "hall_preferences"
-            elif category == "decision" or any(
-                w in content_lower for w in ["decided", "chose", "decision", "will"]
-            ):
-                room = "decisions"
-                closet = "hall_facts"
-            elif category == "person" or any(
-                w in content_lower for w in ["works on", "responsible", "owns"]
-            ):
-                room = "people"
-                closet = "hall_facts"
-            elif category == "project" or any(
-                w in content_lower for w in ["project", "building", "creating"]
-            ):
-                room = "projects"
-                closet = "hall_events"
-            else:
+            if not extracted:
+                closet_map = {
+                    "preference": "hall_preferences",
+                    "decision": "hall_facts",
+                    "milestone": "hall_discoveries",
+                    "problem": "hall_discoveries",
+                    "emotional": "hall_events",
+                }
+
                 room = "general"
                 closet = "hall_events"
+                category = args.get("category", "")
+                content_lower = content.lower()
 
-            doc_id = str(uuid.uuid4())
-            self._collection.add(
-                documents=[content],
-                metadatas=[
+                if category in closet_map:
+                    room = category
+                    closet = closet_map[category]
+                elif any(
+                    w in content_lower for w in ["prefer", "like", "dislike", "favor"]
+                ):
+                    room = "preferences"
+                    closet = "hall_preferences"
+                elif any(
+                    w in content_lower for w in ["decided", "chose", "decision", "will"]
+                ):
+                    room = "decisions"
+                    closet = "hall_facts"
+                elif any(
+                    w in content_lower for w in ["works on", "responsible", "owns"]
+                ):
+                    room = "people"
+                    closet = "hall_facts"
+
+                doc_id = str(uuid.uuid4())
+                self._collection.add(
+                    documents=[content],
+                    metadatas=[
+                        {
+                            "wing": self._default_wing,
+                            "room": room,
+                            "closet": closet,
+                        }
+                    ],
+                    ids=[doc_id],
+                )
+                return json.dumps(
                     {
-                        "wing": self._default_wing,
+                        "result": "Remembered",
+                        "drawer_id": doc_id,
                         "room": room,
                         "closet": closet,
+                        "extracted": False,
                     }
-                ],
-                ids=[doc_id],
-            )
+                )
+
+            room_map = {
+                "preference": ("preferences", "hall_preferences"),
+                "decision": ("decisions", "hall_facts"),
+                "milestone": ("milestones", "hall_discoveries"),
+                "problem": ("problems", "hall_discoveries"),
+                "emotional": ("emotional", "hall_events"),
+            }
+
+            stored = []
+            for chunk in extracted:
+                memory_type = chunk.get("memory_type", "general")
+                room, closet = room_map.get(memory_type, ("general", "hall_events"))
+
+                doc_id = str(uuid.uuid4())
+                self._collection.add(
+                    documents=[chunk["content"]],
+                    metadatas=[
+                        {
+                            "wing": self._default_wing,
+                            "room": room,
+                            "closet": closet,
+                            "memory_type": memory_type,
+                        }
+                    ],
+                    ids=[doc_id],
+                )
+                stored.append({"type": memory_type, "drawer_id": doc_id})
+
             return json.dumps(
                 {
                     "result": "Remembered",
-                    "drawer_id": doc_id,
-                    "room": room,
-                    "closet": closet,
+                    "extracted": True,
+                    "memories": stored,
+                    "count": len(stored),
+                }
+            )
+
+        except ImportError:
+            return json.dumps(
+                {
+                    "error": "general_extractor not available, falling back to raw storage",
+                    "fallback": True,
                 }
             )
         except Exception as e:
