@@ -2,6 +2,14 @@
 
 A local-first AI memory system with palace structure (Wings → Rooms → Closets → Drawers), AAAK compression dialect (30x lossless), and 96.6% recall on LongMemEval benchmark.
 
+## About
+
+This plugin is an implementation of [MemPalace](https://github.com/milla-jovovich/mempalace) as a memory provider for the Hermes Agent.
+
+**Special thanks to [milla-jovovich](https://github.com/milla-jovovich) and [bensig](https://github.com/bensig) for creating the MemPalace system.**
+
+The underlying MemPalace library provides the palace structure, AAAK compression dialect, ChromaDB/SQLite storage, and mining tools. This plugin bridges MemPalace into Hermes Agent's memory provider interface.
+
 ## Features
 
 - **Local-first**: ChromaDB + SQLite, no cloud dependencies, no API key required
