@@ -1018,9 +1018,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             if expires_at:
                 metadata["expires_at"] = expires_at
 
-            import uuid as uuid_mod
-
-            doc_id = str(uuid_mod.uuid4())
+            doc_id = str(uuid.uuid4())
             self._collection.add(
                 documents=[content],
                 metadatas=[metadata],
@@ -1056,6 +1054,15 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             if not content:
                 return json.dumps({"error": "content is required"})
+
+            if self._is_noise(content):
+                return json.dumps(
+                    {
+                        "result": "skipped",
+                        "reason": "noise_filter",
+                        "drawer_id": None,
+                    }
+                )
 
             extracted = extract_memories(content)
 
