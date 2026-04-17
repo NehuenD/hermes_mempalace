@@ -35,6 +35,7 @@ def register_cli(subparsers) -> None:
     sub.add_parser("status", help="Show palace overview")
     sub.add_parser("enable", help="Enable MemPalace in config")
     sub.add_parser("disable", help="Disable MemPalace in config")
+    sub.add_parser("summarize", help="Summarize palace contents")
 
     init_parser = sub.add_parser("init", help="Initialize a new palace")
     init_parser.add_argument(
@@ -67,6 +68,23 @@ def register_cli(subparsers) -> None:
 
     wings_parser = sub.add_parser("wings", help="List all wings and their rooms")
 
+    profile_sub = sub.add_subparsers(
+        dest="mempalace_profile_cmd", help="Profile commands"
+    )
+    profile_sub.add_parser("list", help="List all profiles with drawer counts")
+
+    profile_create = profile_sub.add_parser("create", help="Create a new profile")
+    profile_create.add_argument("name", help="Profile name")
+
+    profile_switch = profile_sub.add_parser("switch", help="Switch to a profile")
+    profile_switch.add_argument("name", help="Profile name")
+
+    profile_delete = profile_sub.add_parser("delete", help="Delete a profile")
+    profile_delete.add_argument("name", help="Profile name")
+    profile_delete.add_argument(
+        "--force", action="store_true", help="Skip confirmation"
+    )
+
     subparsers.set_defaults(func=mempalace_command)
 
 
@@ -75,6 +93,7 @@ def mempalace_command(args) -> int:
     from hermes_cli.config import load_config
 
     cmd = getattr(args, "mempalace_cmd", None)
+    profile_cmd = getattr(args, "mempalace_profile_cmd", None)
     config = load_config()
 
     if cmd == "setup":
@@ -93,10 +112,269 @@ def mempalace_command(args) -> int:
         return cmd_memories(args)
     elif cmd == "wings":
         return cmd_wings(args)
+    elif cmd == "summarize":
+        return cmd_summarize(args)
+    elif profile_cmd:
+        return cmd_profile(args, profile_cmd, config)
     else:
         print(
-            "Usage: hermes mempalace {setup,status,init,mine,memories,wings,enable,disable}"
+            "Usage: hermes mempalace {setup,status,init,mine,memories,wings,enable,disable,summarize}"
         )
+        return 1
+
+
+def cmd_profile(args, profile_cmd, config) -> int:
+    """Handle profile subcommands."""
+    profile_name = getattr(args, "name", None)
+
+    if profile_cmd == "list":
+        return cmd_profile_list(args, config)
+    elif profile_cmd == "create":
+        return cmd_profile_create(args, config)
+    elif profile_cmd == "switch":
+        return cmd_profile_switch(args, config)
+    elif profile_cmd == "delete":
+        return cmd_profile_delete(args, config)
+    else:
+        print(f"Usage: hermes mempalace profile {profile_cmd}")
+        return 1
+
+
+def cmd_summarize(args) -> int:
+    """Summarize palace contents."""
+    try:
+        import chromadb
+    except ImportError:
+        print("ERROR: chromadb not installed")
+        return 1
+
+    try:
+        from hermes_cli.config import load_config
+
+        hermes_config = load_config()
+        mem_cfg = hermes_config.get("memory", {})
+        active_profile = mem_cfg.get("active_profile", "default")
+        profiles = mem_cfg.get("profiles", {})
+
+        profile_path = profiles.get(active_profile, "~/.mempalace/")
+        palace_path = Path(profile_path).expanduser()
+
+        print("=" * 50)
+        print("MemPalace Summary")
+        print("=" * 50)
+        print(f"Active profile: {active_profile}")
+        print(f"Palace path: {palace_path}")
+        print()
+
+        if not palace_path.exists():
+            print("ERROR: Palace not initialized")
+            return 1
+
+        chroma_path = palace_path / "palace" / "chroma.sqlite3"
+        if not chroma_path.exists():
+            print("ERROR: ChromaDB not found")
+            return 1
+
+        client = chromadb.PersistentClient(path=str(palace_path / "palace"))
+        collection = client.get_or_create_collection("mempalace_drawers")
+        count = collection.count()
+
+        print(f"Total drawers: {count}")
+        print()
+
+        all_data = collection.get(include=["metadatas"])
+        wings = {}
+        for m in all_data.get("metadatas") or []:
+            w = m.get("wing", "unknown")
+            wings[w] = wings.get(w, 0) + 1
+
+        print("Wings:")
+        for wing, c in sorted(wings.items(), key=lambda x: -x[1]):
+            print(f"  {wing}: {c} drawers")
+
+        print()
+        print("Status: OK")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_profile_list(args, config) -> int:
+    """List all profiles."""
+    try:
+        import yaml
+        from hermes_cli.config import load_config
+
+        hermes_config = load_config()
+        mem_cfg = hermes_config.get("memory", {})
+        profiles = mem_cfg.get("profiles", {})
+        active = mem_cfg.get("active_profile", "default")
+
+        print("=" * 40)
+        print("MemPalace Profiles")
+        print("=" * 40)
+
+        if not profiles:
+            print("No profiles configured.")
+            print("Default: ~/.mempalace/")
+            return 0
+
+        print(f"Active: {active}")
+        print()
+
+        import sqlite3
+
+        for name, path in profiles.items():
+            p = Path(path).expanduser()
+            active_mark = " *" if name == active else " "
+            if p.exists():
+                chroma = p / "palace" / "chroma.sqlite3"
+                if chroma.exists():
+                    try:
+                        count = (
+                            sqlite3.connect(str(chroma))
+                            .execute("SELECT COUNT(*) FROM embeddings")
+                            .fetchone()[0]
+                        )
+                        print(f"{active_mark} {name}: {path} ({count} drawers)")
+                    except Exception:
+                        print(f"{active_mark} {name}: {path} (error reading)")
+                else:
+                    print(f"{active_mark} {name}: {path} (empty)")
+            else:
+                print(f"{active_mark} {name}: {path} (not created)")
+
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_profile_create(args, config) -> int:
+    """Create a new profile."""
+    name = getattr(args, "name", None)
+    if not name:
+        print("Usage: hermes mempalace profile create <name>")
+        return 1
+
+    try:
+        import yaml
+        from hermes_cli.config import load_config, save_config
+
+        hermes_config = load_config()
+        mem_cfg = hermes_config.setdefault("memory", {})
+        profiles = mem_cfg.setdefault("profiles", {})
+
+        if name in profiles:
+            print(f"Profile '{name}' already exists.")
+            return 1
+
+        path = f"~/.mempalace_{name}/"
+        profiles[name] = path
+        mem_cfg["active_profile"] = name
+
+        save_config(hermes_config)
+
+        profile_dir = Path(path).expanduser()
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        (profile_dir / "palace").mkdir(parents=True, exist_ok=True)
+
+        print(f"Created profile '{name}' at {path}")
+        print(f"Switched to profile '{name}'")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_profile_switch(args, config) -> int:
+    """Switch to a profile."""
+    name = getattr(args, "name", None)
+    if not name:
+        print("Usage: hermes mempalace profile switch <name>")
+        return 1
+
+    try:
+        import yaml
+        from hermes_cli.config import load_config, save_config
+
+        hermes_config = load_config()
+        mem_cfg = hermes_config.setdefault("memory", {})
+        profiles = mem_cfg.setdefault("profiles", {})
+
+        if name not in profiles:
+            path = f"~/.mempalace_{name}/"
+            profiles[name] = path
+        else:
+            path = profiles[name]
+
+        profile_dir = Path(path).expanduser()
+        if not profile_dir.exists():
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            (profile_dir / "palace").mkdir(parents=True, exist_ok=True)
+
+        mem_cfg["active_profile"] = name
+
+        save_config(hermes_config)
+
+        print(f"Switched to profile '{name}'")
+        print(f"Palace path: {path}")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_profile_delete(args, config) -> int:
+    """Delete a profile."""
+    name = getattr(args, "name", None)
+    force = getattr(args, "force", False)
+
+    if not name:
+        print("Usage: hermes mempalace profile delete <name>")
+        return 1
+
+    if name == "default":
+        print("Cannot delete 'default' profile.")
+        return 1
+
+    try:
+        import yaml
+        from hermes_cli.config import load_config, save_config
+
+        hermes_config = load_config()
+        mem_cfg = hermes_config.setdefault("memory", {})
+        profiles = mem_cfg.setdefault("profiles", {})
+
+        if name not in profiles:
+            print(f"Profile '{name}' not found.")
+            return 1
+
+        if not force:
+            confirm = input(f"Delete profile '{name}'? [y/N]: ").strip().lower()
+            if confirm != "y":
+                print("Cancelled.")
+                return 0
+
+        path = profiles.pop(name)
+        profile_dir = Path(path).expanduser()
+
+        if profile_dir.exists():
+            import shutil
+
+            shutil.rmtree(profile_dir)
+
+        active = mem_cfg.get("active_profile", "default")
+        if active == name:
+            mem_cfg["active_profile"] = "default"
+
+        save_config(hermes_config)
+
+        print(f"Deleted profile '{name}'")
+        return 0
+    except Exception as e:
+        print(f"Error: {e}")
         return 1
 
 
