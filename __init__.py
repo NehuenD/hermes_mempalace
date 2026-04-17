@@ -35,16 +35,31 @@ logger = logging.getLogger(__name__)
 _DEFAULT_PALACE_PATH = "~/.mempalace/"
 _DEFAULT_COLLECTION = "mempalace_drawers"
 _DEFAULT_WING = "wing_general"
+_DEFAULT_TTL_DAYS = 90
+
+NOISE_PATTERNS = [
+    "nothing to save",
+    "no new memories",
+    "no memories to save",
+    "no significant memories",
+    "nothing new to save",
+    "nothing important to save",
+    "no information to save",
+]
 
 
 def _load_config() -> dict:
-    """Load config from env vars with $HERMES_HOME/.mempalace/config.json overrides."""
+    """Load config from env vars with $HERMES_HOME/.mempalace/config.json overrides.
+
+    Also supports multi-profile via memory.profiles in hermes config.yaml.
+    """
     from hermes_constants import get_hermes_home
 
     config = {
         "palace_path": os.environ.get("MEMPALACE_PATH", _DEFAULT_PALACE_PATH),
         "collection_name": os.environ.get("MEMPALACE_COLLECTION", _DEFAULT_COLLECTION),
         "default_wing": os.environ.get("MEMPALACE_DEFAULT_WING", _DEFAULT_WING),
+        "ttl_days": int(os.environ.get("MEMPALACE_TTL_DAYS", _DEFAULT_TTL_DAYS)),
     }
 
     config_path = get_hermes_home() / ".mempalace" / "config.json"
@@ -56,6 +71,26 @@ def _load_config() -> dict:
             )
         except Exception:
             pass
+
+    try:
+        import yaml
+
+        hermes_config_path = get_hermes_home() / "config.yaml"
+        if hermes_config_path.exists():
+            hermes_cfg = yaml.safe_load(hermes_config_path.read_text()) or {}
+            mem_cfg = hermes_cfg.get("memory", {})
+            active_profile = mem_cfg.get("active_profile", "default")
+            profiles = mem_cfg.get("profiles", {})
+
+            if active_profile in profiles:
+                config["palace_path"] = profiles[active_profile]
+            elif profiles:
+                config["palace_path"] = profiles.get("default", _DEFAULT_PALACE_PATH)
+
+            config["active_profile"] = active_profile
+            config["profiles"] = profiles
+    except Exception:
+        pass
 
     return config
 
@@ -156,7 +191,9 @@ ADD_DRAWER_SCHEMA = {
     "description": (
         "File verbatim content into a wing/room/closet. "
         "Stores the original content for later retrieval. "
-        "Use after decisions, discoveries, or important exchanges."
+        "Use after decisions, discoveries, or important exchanges. "
+        "Content matching noise patterns like 'Nothing to save' is automatically skipped. "
+        "Supports optional TTL (default 90 days) for automatic expiry."
     ),
     "parameters": {
         "type": "object",
@@ -176,6 +213,14 @@ ADD_DRAWER_SCHEMA = {
             "closet": {
                 "type": "string",
                 "description": "Closet/hall name (e.g. 'hall_facts').",
+            },
+            "ttl_days": {
+                "type": "integer",
+                "description": "Time-to-live in days (0=never, default: 90).",
+            },
+            "expires_at": {
+                "type": "string",
+                "description": "ISO timestamp for explicit expiry override.",
             },
         },
         "required": ["content", "wing"],
@@ -374,6 +419,56 @@ DIARY_READ_SCHEMA = {
     },
 }
 
+SUMMARIZE_SCHEMA = {
+    "name": "mempalace_summarize",
+    "description": (
+        "Get a structured summary of the palace — wings, rooms, drawer counts, "
+        "oldest/newest entries, and storage stats. Use at session start to understand "
+        "the current memory state. Supports per-wing or per-room scope, and "
+        "'full' mode that reads actual content (slower)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "wing": {
+                "type": "string",
+                "description": "Optional wing to summarize.",
+            },
+            "room": {
+                "type": "string",
+                "description": "Optional room to summarize (requires wing).",
+            },
+            "full": {
+                "type": "boolean",
+                "description": "Read actual content for synthesis (slower, default: false).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max content samples for full mode (default: 20).",
+            },
+        },
+        "required": [],
+    },
+}
+
+PROFILE_LIST_SCHEMA = {
+    "name": "mempalace_profile_list",
+    "description": "List all MemPalace profiles with drawer counts.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
+PROFILE_SWITCH_SCHEMA = {
+    "name": "mempalace_profile_switch",
+    "description": "Switch to a different MemPalace profile.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Profile name to switch to."},
+        },
+        "required": ["name"],
+    },
+}
+
 ALL_TOOL_SCHEMAS = [
     STATUS_SCHEMA,
     LIST_WINGS_SCHEMA,
@@ -395,6 +490,9 @@ ALL_TOOL_SCHEMAS = [
     DIARY_WRITE_SCHEMA,
     DIARY_READ_SCHEMA,
     REMEMBER_SCHEMA,
+    SUMMARIZE_SCHEMA,
+    PROFILE_LIST_SCHEMA,
+    PROFILE_SWITCH_SCHEMA,
 ]
 
 
@@ -746,6 +844,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_diary_write(args)
             elif tool_name == "mempalace_diary_read":
                 return self._tool_diary_read(args)
+            elif tool_name == "mempalace_summarize":
+                return self._tool_summarize(args)
+            elif tool_name == "mempalace_profile_list":
+                return self._tool_profile_list()
+            elif tool_name == "mempalace_profile_switch":
+                return self._tool_profile_switch(args)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -875,24 +979,58 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         except Exception as e:
             return json.dumps({"error": str(e)})
 
+    def _is_noise(self, content: str) -> bool:
+        """Check if content matches noise patterns that shouldn't be stored."""
+        content_lower = content.lower().strip()
+        for pattern in NOISE_PATTERNS:
+            if pattern in content_lower:
+                return True
+        return False
+
     def _tool_add_drawer(self, args: dict) -> str:
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
             import uuid
+            from datetime import datetime, timedelta
 
             content = args.get("content", "")
             wing = args.get("wing", self._default_wing)
             room = args.get("room", "general")
             closet = args.get("closet", "hall_general")
 
+            if self._is_noise(content):
+                return json.dumps(
+                    {
+                        "result": "skipped",
+                        "reason": "noise_filter",
+                        "drawer_id": None,
+                    }
+                )
+
+            expires_at = args.get("expires_at")
+            if not expires_at:
+                ttl_days = args.get("ttl_days", _DEFAULT_TTL_DAYS)
+                if ttl_days > 0:
+                    expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
+
+            metadata = {"wing": wing, "room": room, "closet": closet}
+            if expires_at:
+                metadata["expires_at"] = expires_at
+
             doc_id = str(uuid.uuid4())
             self._collection.add(
                 documents=[content],
-                metadatas=[{"wing": wing, "room": room, "closet": closet}],
+                metadatas=[metadata],
                 ids=[doc_id],
             )
-            return json.dumps({"result": "Drawer added", "drawer_id": doc_id})
+            return json.dumps(
+                {
+                    "result": "Drawer added",
+                    "drawer_id": doc_id,
+                    "expires_at": expires_at,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -916,6 +1054,15 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             if not content:
                 return json.dumps({"error": "content is required"})
+
+            if self._is_noise(content):
+                return json.dumps(
+                    {
+                        "result": "skipped",
+                        "reason": "noise_filter",
+                        "drawer_id": None,
+                    }
+                )
 
             extracted = extract_memories(content)
 
@@ -1152,6 +1299,205 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         except Exception as e:
             return json.dumps({"error": str(e)})
 
+    def _tool_summarize(self, args: dict) -> str:
+        """Summarize the palace - wings, rooms, counts, oldest/newest."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+
+        try:
+            wing = args.get("wing")
+            room = args.get("room")
+            full_mode = args.get("full", False)
+            limit = args.get("limit", 20)
+
+            where_filter = {}
+            if wing:
+                where_filter["wing"] = wing
+            if room:
+                where_filter["room"] = room
+
+            all_data = self._collection.get(
+                where=where_filter if where_filter else None,
+                include=["metadatas", "documents"] if full_mode else ["metadatas"],
+            )
+
+            metadatas = all_data.get("metadatas", [])
+            documents = all_data.get("documents", []) if full_mode else []
+
+            taxonomy = {}
+            wing_counts = {}
+            room_counts = {}
+            oldest_ts = None
+            newest_ts = None
+
+            for i, m in enumerate(metadatas):
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                ts = m.get("created_at", "")
+
+                wing_counts[w] = wing_counts.get(w, 0) + 1
+                if w not in taxonomy:
+                    taxonomy[w] = {}
+                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
+
+                if ts:
+                    if oldest_ts is None or ts < oldest_ts:
+                        oldest_ts = ts
+                    if newest_ts is None or ts > newest_ts:
+                        newest_ts = ts
+
+            total = len(metadatas)
+            wings_list = [
+                {"name": w, "drawers": c}
+                for w, c in sorted(wing_counts.items(), key=lambda x: -x[1])
+            ]
+
+            result = {
+                "total_drawers": total,
+                "wings": wings_list,
+                "taxonomy": taxonomy,
+                "oldest_drawer": oldest_ts,
+                "newest_drawer": newest_ts,
+                "palace_path": str(self._palace_path),
+            }
+
+            if full_mode and documents:
+                samples = []
+                for doc in documents[:limit]:
+                    samples.append(doc[:200] if doc else "")
+                result["samples"] = samples
+
+            return json.dumps(result)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_profile_list(self) -> str:
+        """List all MemPalace profiles."""
+        try:
+            profiles = {}
+            default_path = Path(os.path.expanduser(_DEFAULT_PALACE_PATH))
+            hermes_home = Path.home() / ".hermes"
+
+            if hermes_home.exists():
+                config_path = hermes_home / "config.yaml"
+                if config_path.exists():
+                    import yaml
+
+                    config_data = yaml.safe_load(config_path.read_text()) or {}
+                    mem_cfg = config_data.get("memory", {})
+                    profile_cfg = mem_cfg.get("profiles", {})
+                    active = mem_cfg.get("active_profile", "default")
+
+                    for name, path in profile_cfg.items():
+                        p = Path(os.path.expanduser(path))
+                        if p.exists():
+                            chroma_path = p / "palace" / "chroma.sqlite3"
+                            if chroma_path.exists():
+                                import sqlite3
+
+                                try:
+                                    count = (
+                                        sqlite3.connect(str(chroma_path))
+                                        .execute("SELECT COUNT(*) FROM embeddings")
+                                        .fetchone()[0]
+                                    )
+                                    profiles[name] = {
+                                        "path": str(p),
+                                        "drawers": count,
+                                        "active": name == active,
+                                    }
+                                except Exception:
+                                    profiles[name] = {
+                                        "path": str(p),
+                                        "drawers": 0,
+                                        "active": name == active,
+                                    }
+
+            if not profiles:
+                default_path = Path(os.path.expanduser(_DEFAULT_PALACE_PATH))
+                if default_path.exists():
+                    chroma_path = default_path / "palace" / "chroma.sqlite3"
+                    if chroma_path.exists():
+                        import sqlite3
+
+                        try:
+                            count = (
+                                sqlite3.connect(str(chroma_path))
+                                .execute("SELECT COUNT(*) FROM embeddings")
+                                .fetchone()[0]
+                            )
+                            profiles["default"] = {
+                                "path": str(default_path),
+                                "drawers": count,
+                                "active": True,
+                            }
+                        except Exception:
+                            pass
+
+            if not profiles:
+                profiles["default"] = {
+                    "path": str(default_path),
+                    "drawers": 0,
+                    "active": True,
+                }
+
+            return json.dumps({"profiles": profiles})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_profile_switch(self, args: dict) -> str:
+        """Switch to a different profile."""
+        try:
+            name = args.get("name", "")
+            if not name:
+                return json.dumps({"error": "Profile name required"})
+
+            hermes_home = Path.home() / ".hermes"
+            config_path = hermes_home / "config.yaml"
+
+            if not config_path.exists():
+                return json.dumps({"error": "Config not found"})
+
+            import yaml
+
+            config_data = yaml.safe_load(config_path.read_text()) or {}
+            mem_cfg = config_data.get("memory", {})
+            profiles = mem_cfg.get("profiles", {})
+
+            if name not in profiles:
+                profiles[name] = f"~/.mempalace_{name}/"
+
+            profile_path = Path(os.path.expanduser(profiles[name]))
+            if not profile_path.exists():
+                profile_path.mkdir(parents=True, exist_ok=True)
+                (profile_path / "palace").mkdir(parents=True, exist_ok=True)
+
+            mem_cfg["active_profile"] = name
+
+            if "memory" not in config_data:
+                config_data["memory"] = mem_cfg
+            else:
+                config_data["memory"] = mem_cfg
+
+            config_path.write_text(yaml.dump(config_data))
+
+            self._config = _load_config()
+            self._palace_path = _get_palace_path(self._config)
+
+            self._chroma_client = None
+            self._collection = None
+            self._ensure_palace()
+
+            return json.dumps(
+                {
+                    "result": "Switched",
+                    "profile": name,
+                    "palace_path": str(self._palace_path),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         self._turn_count = turn_number
         remaining_tokens = kwargs.get("remaining_tokens")
@@ -1165,6 +1511,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
         def _extract():
             try:
+                from datetime import datetime
+
+                topics = set()
+                key_points = []
+
                 for msg in messages[-10:]:
                     role = msg.get("role", "")
                     content = msg.get("content", "")
@@ -1181,6 +1532,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     elif "problem" in content.lower() or "issue" in content.lower():
                         closet = "hall_discoveries"
 
+                    if len(content) > 100:
+                        content = content[:500] + "..."
+
                     try:
                         import uuid
 
@@ -1194,6 +1548,57 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         )
                     except Exception as e:
                         logger.debug("Failed to extract session memory: %s", e)
+
+                for msg in messages[-10:]:
+                    content = msg.get("content", "")
+                    if not content:
+                        continue
+                    content_lower = content.lower()
+                    if "cod" in content_lower or "implement" in content_lower:
+                        topics.add("code")
+                    if (
+                        "fix" in content_lower
+                        or "bug" in content_lower
+                        or "error" in content_lower
+                    ):
+                        topics.add("fix")
+                    if "design" in content_lower or "architecture" in content_lower:
+                        topics.add("design")
+                    if "test" in content_lower:
+                        topics.add("testing")
+
+                if topics:
+                    try:
+                        import uuid
+                        from datetime import datetime
+
+                        now = datetime.now()
+                        date_str = now.strftime("%Y-%m-%d")
+                        topics_str = ",".join(sorted(topics))
+
+                        diary_entry = (
+                            f"DATE:{date_str}|ACTIVITIES:{topics_str}|"
+                            f"TURNS:{self._turn_count}|"
+                            f"NOTES:auto-extracted from session"
+                        )
+
+                        doc_id = str(uuid.uuid4())
+                        self._collection.add(
+                            documents=[diary_entry],
+                            metadatas=[
+                                {
+                                    "wing": "wing_myos",
+                                    "room": "diary",
+                                    "closet": "hall_events",
+                                    "created_at": now.isoformat(),
+                                }
+                            ],
+                            ids=[doc_id],
+                        )
+                        logger.debug("Added auto diary entry for session")
+                    except Exception as e:
+                        logger.debug("Failed to create diary entry: %s", e)
+
             except Exception as e:
                 logger.debug("Session end extraction failed: %s", e)
 
