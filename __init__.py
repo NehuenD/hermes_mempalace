@@ -25,6 +25,8 @@ import json
 import logging
 import os
 import threading
+from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -353,7 +355,7 @@ TRAVERSE_SCHEMA = {
                 "type": "string",
                 "description": "Room to start traversal from.",
             },
-            "max_depth": {
+            "max_hops": {
                 "type": "integer",
                 "description": "Max traversal depth (default: 3).",
             },
@@ -382,6 +384,85 @@ GRAPH_STATS_SCHEMA = {
     "name": "mempalace_graph_stats",
     "description": "Get palace graph connectivity statistics.",
     "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
+RECALL_MISTAKES_SCHEMA = {
+    "name": "mempalace_recall_mistakes",
+    "description": (
+        "Recall past mistakes by domain to prevent repeating errors. "
+        "Returns all recorded mistakes for a domain with severity."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "domain": {
+                "type": "string",
+                "description": "Domain tag to recall (e.g., 'android', 'minecraft', 'skill').",
+            },
+        },
+        "required": ["domain"],
+    },
+}
+
+SEARCH_MISTAKES_SCHEMA = {
+    "name": "mempalace_search_mistakes",
+    "description": (
+        "Search mistakes registry for relevant past errors. "
+        "Use before tackling tasks to avoid repeating mistakes."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results (default: 5).",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+RECORD_MISTAKE_SCHEMA = {
+    "name": "mempalace_record_mistake",
+    "description": (
+        "Record a mistake or error to the mistakes registry. "
+        "Use after any significant error to build institutional memory."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "Description of what happened.",
+            },
+            "domain": {
+                "type": "string",
+                "description": "Domain area (e.g., 'android', 'ios', 'minecraft', 'web', 'general').",
+            },
+            "severity": {
+                "type": "string",
+                "enum": ["HIGH", "MED", "LOW"],
+                "description": "Error severity.",
+            },
+            "error_type": {
+                "type": "string",
+                "enum": [
+                    "runtime",
+                    "build",
+                    "logic",
+                    "network",
+                    "workflow",
+                    "security",
+                ],
+                "description": "Type of error.",
+            },
+        },
+        "required": ["content", "domain", "severity"],
+    },
 }
 
 DIARY_WRITE_SCHEMA = {
@@ -493,6 +574,9 @@ ALL_TOOL_SCHEMAS = [
     SUMMARIZE_SCHEMA,
     PROFILE_LIST_SCHEMA,
     PROFILE_SWITCH_SCHEMA,
+    RECORD_MISTAKE_SCHEMA,
+    SEARCH_MISTAKES_SCHEMA,
+    RECALL_MISTAKES_SCHEMA,
 ]
 
 
@@ -512,6 +596,7 @@ class MempalaceMemoryProvider(MemoryProvider):
         self._chroma_client = None
         self._collection = None
         self._kg = None
+        self._taxonomy_cache: Dict[str, Dict[str, int]] = {}
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread: Optional[threading.Thread] = None
@@ -591,6 +676,8 @@ class MempalaceMemoryProvider(MemoryProvider):
             logger.info("MemPalace initialized at %s", self._palace_path)
 
             self._load_wake_up_context()
+            self._build_taxonomy_cache()
+            self._sweep_expired_drawers()
         except Exception as e:
             logger.warning("Failed to initialize MemPalace: %s", e)
             self._available = False
@@ -635,6 +722,47 @@ class MempalaceMemoryProvider(MemoryProvider):
         except Exception as e:
             logger.debug("Palace not available: %s", e)
             return False
+
+    def _build_taxonomy_cache(self) -> None:
+        if not self._collection:
+            return
+        try:
+            all_data = self._collection.get(include=["metadatas"])
+            taxonomy: Dict[str, Dict[str, int]] = {}
+            for m in all_data.get("metadatas", []) or []:
+                w = m.get("wing", "unknown")
+                r = m.get("room", "unknown")
+                if w not in taxonomy:
+                    taxonomy[w] = {}
+                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
+            self._taxonomy_cache = taxonomy
+            logger.debug("Taxonomy cache built: %d wings", len(taxonomy))
+        except Exception as e:
+            logger.debug("Failed to build taxonomy cache: %s", e)
+
+    def _update_taxonomy_cache(self, wing: str, room: str, delta: int) -> None:
+        if wing not in self._taxonomy_cache:
+            self._taxonomy_cache[wing] = {}
+        if room not in self._taxonomy_cache[wing]:
+            self._taxonomy_cache[wing][room] = 0
+        self._taxonomy_cache[wing][room] += delta
+        if self._taxonomy_cache[wing][room] <= 0:
+            del self._taxonomy_cache[wing][room]
+        if not self._taxonomy_cache[wing]:
+            del self._taxonomy_cache[wing]
+
+    def _sweep_expired_drawers(self) -> None:
+        if not self._collection:
+            return
+        try:
+            now = datetime.now().isoformat()
+            all_data = self._collection.get(where={"expires_at": {"$lt": now}})
+            expired_ids = all_data.get("ids", [])
+            if expired_ids:
+                self._collection.delete(ids=expired_ids)
+                logger.info("Swept %d expired drawers", len(expired_ids))
+        except Exception as e:
+            logger.debug("Failed to sweep expired drawers: %s", e)
 
     def system_prompt_block(self) -> str:
         aaak_guide = """## AAAK Compression Dialect
@@ -850,6 +978,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_profile_list()
             elif tool_name == "mempalace_profile_switch":
                 return self._tool_profile_switch(args)
+            elif tool_name == "mempalace_record_mistake":
+                return self._tool_record_mistake(args)
+            elif tool_name == "mempalace_search_mistakes":
+                return self._tool_search_mistakes(args)
+            elif tool_name == "mempalace_recall_mistakes":
+                return self._tool_recall_mistakes(args)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -904,15 +1038,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
-            all_data = self._collection.get(include=["metadatas"])
-            taxonomy = {}
-            for m in all_data.get("metadatas", []):
-                w = m.get("wing", "unknown")
-                r = m.get("room", "unknown")
-                if w not in taxonomy:
-                    taxonomy[w] = {}
-                taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
-            return json.dumps({"taxonomy": taxonomy})
+            return json.dumps({"taxonomy": self._taxonomy_cache})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -933,18 +1059,22 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 n_results=limit,
             )
             items = []
-            for r in results:
-                meta = r.get("metadata", {})
-                if wing and meta.get("wing") != wing:
+            raw_results = (
+                results.get("results", []) if isinstance(results, dict) else results
+            )
+            for r in raw_results:
+                r_wing = r.get("wing", "")
+                r_room = r.get("room", "")
+                if wing and r_wing != wing:
                     continue
-                if room and meta.get("room") != room:
+                if room and r_room != room:
                     continue
                 items.append(
                     {
                         "text": r.get("text", r.get("content", "")),
-                        "score": r.get("distance", 0),
-                        "wing": meta.get("wing"),
-                        "room": meta.get("room"),
+                        "score": r.get("similarity", r.get("distance", 0)),
+                        "wing": r_wing,
+                        "room": r_room,
                     }
                 )
             return json.dumps({"results": items, "count": len(items)})
@@ -1024,6 +1154,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 metadatas=[metadata],
                 ids=[doc_id],
             )
+            self._update_taxonomy_cache(wing, room, 1)
             return json.dumps(
                 {
                     "result": "Drawer added",
@@ -1174,6 +1305,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         try:
             drawer_id = args.get("drawer_id", "")
             self._collection.delete(ids=[drawer_id])
+            self._build_taxonomy_cache()
             return json.dumps({"result": "Drawer deleted"})
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -1239,10 +1371,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             from mempalace.palace_graph import traverse
 
             start_room = args.get("start_room", "")
-            max_depth = args.get("max_depth", 3)
-            results = traverse(
-                start_room, max_depth=max_depth, palace_path=str(self._palace_path)
-            )
+            max_hops = args.get("max_hops", args.get("max_depth", 3))
+            results = traverse(start_room, max_hops=max_hops, col=self._collection)
             return json.dumps({"start_room": start_room, "traversal": results})
         except ImportError:
             return json.dumps({"error": "palace_graph not available"})
@@ -1255,7 +1385,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             wing_a = args.get("wing_a", "")
             wing_b = args.get("wing_b", "")
-            tunnels = find_tunnels(wing_a, wing_b, palace_path=str(self._palace_path))
+            tunnels = find_tunnels(wing_a=wing_a, wing_b=wing_b, col=self._collection)
             return json.dumps({"wing_a": wing_a, "wing_b": wing_b, "tunnels": tunnels})
         except ImportError:
             return json.dumps({"error": "palace_graph not available"})
@@ -1266,7 +1396,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         try:
             from mempalace.palace_graph import graph_stats
 
-            stats = graph_stats(palace_path=str(self._palace_path))
+            stats = graph_stats(col=self._collection)
             return json.dumps({"graph_stats": stats})
         except ImportError:
             return json.dumps({"error": "palace_graph not available"})
@@ -1494,6 +1624,123 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     "profile": name,
                     "palace_path": str(self._palace_path),
                 }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_record_mistake(self, args: dict) -> str:
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            import uuid
+            from datetime import datetime, timedelta
+
+            content = args.get("content", "")
+            domain = args.get("domain", "general")
+            severity = args.get("severity", "MED")
+            error_type = args.get("error_type", "runtime")
+
+            room = f"room_{domain}"
+            closet = "hall_errors"
+
+            entity_code = f"{domain.upper()[:4]}_{len(content)}"
+            formatted = f"{entity_code} → {domain}|mistake|{content}|error_type:{error_type},severity:{severity}"
+
+            metadata = {
+                "wing": "wing_mistakes",
+                "room": room,
+                "closet": closet,
+                "domain": domain,
+                "severity": severity,
+                "error_type": error_type,
+            }
+
+            doc_id = str(uuid.uuid4())
+            self._collection.add(
+                documents=[formatted],
+                metadatas=[metadata],
+                ids=[doc_id],
+            )
+            self._update_taxonomy_cache("wing_mistakes", room, 1)
+
+            if self._kg:
+                self._kg.add_triple(
+                    entity_code,
+                    "mistake",
+                    content,
+                    valid_from=datetime.now().isoformat(),
+                )
+
+            return json.dumps(
+                {
+                    "result": "Mistake recorded",
+                    "mistake_id": doc_id,
+                    "domain": domain,
+                    "severity": severity,
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_search_mistakes(self, args: dict) -> str:
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            query = args.get("query", "")
+            limit = args.get("limit", 5)
+
+            results = self._collection.get(
+                where={"wing": "wing_mistakes"},
+                include=["metadatas", "documents"],
+            )
+            items = []
+            for i, doc in enumerate(results.get("documents", []) or []):
+                meta = results.get("metadatas", [])[i]
+                doc_lower = doc.lower()
+                query_lower = query.lower()
+                if query_lower and query_lower not in doc_lower:
+                    continue
+                items.append(
+                    {
+                        "text": doc,
+                        "domain": meta.get("domain"),
+                        "severity": meta.get("severity"),
+                        "error_type": meta.get("error_type"),
+                    }
+                )
+                if len(items) >= limit:
+                    break
+
+            return json.dumps({"results": items, "count": len(items)})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_recall_mistakes(self, args: dict) -> str:
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            domain = args.get("domain", "")
+            if not domain:
+                return json.dumps({"error": "Domain required"})
+
+            room = f"room_{domain}"
+            results = self._collection.get(
+                where={"wing": "wing_mistakes", "room": room},
+                include=["metadatas", "documents"],
+            )
+            items = []
+            for i, doc in enumerate(results.get("documents", []) or []):
+                meta = results.get("metadatas", [])[i]
+                items.append(
+                    {
+                        "text": doc,
+                        "severity": meta.get("severity"),
+                        "error_type": meta.get("error_type"),
+                    }
+                )
+
+            return json.dumps(
+                {"domain": domain, "mistakes": items, "count": len(items)}
             )
         except Exception as e:
             return json.dumps({"error": str(e)})

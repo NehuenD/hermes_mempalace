@@ -67,3 +67,6 @@ Thumbs.db
 # Local config (may contain secrets)
 .env
 .env.local
+
+# Custom documentation
+improvements.md
