@@ -1194,9 +1194,16 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_get_aaak_spec(self) -> str:
         try:
-            from mempalace.dialect import AAAK_SPEC
+            from mempalace.dialect import Dialect
 
-            return json.dumps({"aaak_spec": AAAK_SPEC})
+            return json.dumps(
+                {
+                    "aaak_spec": {
+                        "format": "ENTITY → codes|topic|quote|flags",
+                        "example": "NEH → android,kotlin|pref_nullcheck|CORE",
+                    }
+                }
+            )
         except ImportError:
             return json.dumps({"error": "AAAK dialect not available"})
         except Exception as e:
