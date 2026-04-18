@@ -159,10 +159,24 @@ class MempalaceClient:
         """Get full wing → room → count taxonomy."""
         if not self.collection:
             return {}
+
+        # Try to load from cache file first
+        cache_file = (
+            self.palace_path / "taxonomy_cache.json" if self.palace_path else None
+        )
+        if cache_file and cache_file.exists():
+            import json as json_lib
+
+            try:
+                return json_lib.loads(cache_file.read_text())
+            except Exception:
+                pass
+
+        # Full scan fallback
         taxonomy = {}
         try:
             all_data = self.collection.get(include=["metadatas"])
-            for m in all_data.get("metadatas", []):
+            for m in all_data.get("metadatas", []) or []:
                 w = m.get("wing", "unknown")
                 r = m.get("room", "unknown")
                 if w not in taxonomy:

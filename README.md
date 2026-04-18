@@ -15,7 +15,7 @@ The underlying MemPalace library provides the palace structure, AAAK compression
 - **Local-first**: ChromaDB + SQLite, no cloud dependencies, no API key required
 - **Palace Structure**: Hierarchical memory organization with Wings, Rooms, Closets, and Drawers
 - **AAAK Compression**: 30x lossless compression for fast context loading (~170 tokens for full memory)
-- **19 Tools**: Full read/write access to palace, knowledge graph, navigation, and agent diaries
+- **26 Tools**: Full read/write access to palace, knowledge graph, navigation, diaries, and mistakes registry
 - **96.6% Recall**: Highest published score on LongMemEval benchmark
 - **Auto-Mining**: Automatic conversation chunking and room detection
 
@@ -71,7 +71,7 @@ hermes mempalace status
 
 Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 
-## Available Tools (20 total)
+## Available Tools (26 total)
 
 ### Read Tools
 | Tool | Description |
@@ -112,6 +112,13 @@ Config is stored in `$HERMES_HOME/.mempalace/config.json`.
 |------|-------------|
 | `mempalace_diary_write` | Write AAAK diary entry |
 | `mempalace_diary_read` | Read recent diary entries |
+
+### Mistakes Registry Tools
+| Tool | Description |
+|------|-------------|
+| `mempalace_record_mistake` | Record a mistake to prevent repetition |
+| `mempalace_search_mistakes` | Search mistakes by query |
+| `mempalace_recall_mistakes` | Recall mistakes by domain |
 
 ## CLI Commands
 

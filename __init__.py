@@ -465,6 +465,29 @@ RECORD_MISTAKE_SCHEMA = {
     },
 }
 
+NOISE_FILTER_SCHEMA = {
+    "name": "mempalace_noise_filter",
+    "description": (
+        "Manage noise patterns that are filtered when saving memories. "
+        "Use mode 'list' to see patterns, 'add' to add, 'remove' to remove."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["list", "add", "remove"],
+                "description": "Operation: list current patterns, add a new one, or remove an existing one.",
+            },
+            "pattern": {
+                "type": "string",
+                "description": "Pattern to add or remove (required for add/remove modes).",
+            },
+        },
+        "required": ["mode"],
+    },
+}
+
 DIARY_WRITE_SCHEMA = {
     "name": "mempalace_diary_write",
     "description": (
@@ -577,6 +600,7 @@ ALL_TOOL_SCHEMAS = [
     RECORD_MISTAKE_SCHEMA,
     SEARCH_MISTAKES_SCHEMA,
     RECALL_MISTAKES_SCHEMA,
+    NOISE_FILTER_SCHEMA,
 ]
 
 
@@ -597,6 +621,7 @@ class MempalaceMemoryProvider(MemoryProvider):
         self._collection = None
         self._kg = None
         self._taxonomy_cache: Dict[str, Dict[str, int]] = {}
+        self._noise_patterns: List[str] = []
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread: Optional[threading.Thread] = None
@@ -678,6 +703,7 @@ class MempalaceMemoryProvider(MemoryProvider):
             self._load_wake_up_context()
             self._build_taxonomy_cache()
             self._sweep_expired_drawers()
+            self._seed_kg_if_empty()
         except Exception as e:
             logger.warning("Failed to initialize MemPalace: %s", e)
             self._available = False
@@ -763,6 +789,71 @@ class MempalaceMemoryProvider(MemoryProvider):
                 logger.info("Swept %d expired drawers", len(expired_ids))
         except Exception as e:
             logger.debug("Failed to sweep expired drawers: %s", e)
+
+    def _seed_kg_if_empty(self) -> None:
+        if not self._kg or not self._palace_path:
+            return
+        try:
+            hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+            soul_path = Path(hermes_home) / "SOUL.md"
+            registry_path = Path.home() / ".mempalace" / "entity_registry.json"
+
+            # Check if KG already has content
+            kg_stats = self._kg.stats()
+            if kg_stats and kg_stats.get("triples", 0) > 0:
+                logger.debug("KG already has data, skipping seed")
+                return
+
+            now = datetime.now().isoformat()
+            count = 0
+
+            # Seed from SOUL.md
+            if soul_path.exists():
+                facts = [
+                    ("NEH", "core_value", "genuine_helpful", now),
+                    ("NEH", "core_value", "have_opinions", now),
+                    ("NEH", "core_value", "resourceful", now),
+                    ("NEH", "core_value", "earn_trust", now),
+                    ("NEH", "core_value", "remember_guest", now),
+                ]
+                for kw in ["private", "ask_before", "careful"]:
+                    facts.append(("NEH", "boundary", kw, now))
+                for kw in ["concise", "thorough"]:
+                    facts.append(("NEH", "vibe", kw, now))
+
+                for subject, predicate, obj, valid_from in facts:
+                    try:
+                        self._kg.add_triple(
+                            subject, predicate, obj, valid_from=valid_from
+                        )
+                        count += 1
+                    except Exception:
+                        pass
+
+            # Seed from entity_registry.json
+            if registry_path.exists():
+                try:
+                    import json as json_lib
+
+                    content = json_lib.loads(registry_path.read_text())
+                    for name, data in content.get("people", {}).items():
+                        entity_code = name[:3].upper()
+                        rel = data.get("relationship", "")
+                        if rel:
+                            self._kg.add_triple(
+                                "NEH",
+                                "relationship",
+                                f"{entity_code}:{rel}",
+                                valid_from=now,
+                            )
+                            count += 1
+                except Exception:
+                    pass
+
+            if count > 0:
+                logger.info("KG seeded with %d triples", count)
+        except Exception as e:
+            logger.debug("Failed to seed KG: %s", e)
 
     def system_prompt_block(self) -> str:
         aaak_guide = """## AAAK Compression Dialect
@@ -984,6 +1075,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_search_mistakes(args)
             elif tool_name == "mempalace_recall_mistakes":
                 return self._tool_recall_mistakes(args)
+            elif tool_name == "mempalace_noise_filter":
+                return self._tool_noise_filter(args)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1111,8 +1204,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _is_noise(self, content: str) -> bool:
         """Check if content matches noise patterns that shouldn't be stored."""
+        if not self._noise_patterns:
+            self._noise_patterns = self._load_noise_patterns()
         content_lower = content.lower().strip()
-        for pattern in NOISE_PATTERNS:
+        for pattern in self._noise_patterns:
             if pattern in content_lower:
                 return True
         return False
@@ -1361,7 +1456,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         if not self._kg:
             return json.dumps({"error": "Knowledge graph not available"})
         try:
-            stats = self._kg.get_stats()
+            stats = self._kg.stats()
             return json.dumps({"stats": stats})
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -1440,6 +1535,26 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             full_mode = args.get("full", False)
             limit = args.get("limit", 20)
 
+            # Fast path: use cache for counts when no filtering needed
+            if not full_mode and not wing and not room:
+                taxonomy = dict(self._taxonomy_cache)
+                wing_counts = {w: sum(taxonomy[w].values()) for w in taxonomy}
+                total = sum(wing_counts.values())
+                wings_list = [
+                    {"name": w, "drawers": c}
+                    for w, c in sorted(wing_counts.items(), key=lambda x: -x[1])
+                ]
+                return json.dumps(
+                    {
+                        "total_drawers": total,
+                        "wings": wings_list,
+                        "taxonomy": taxonomy,
+                        "palace_path": str(self._palace_path),
+                        "from_cache": True,
+                    }
+                )
+
+            # Full scan path: for filtered queries or full_mode
             where_filter = {}
             if wing:
                 where_filter["wing"] = wing
@@ -1451,16 +1566,15 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 include=["metadatas", "documents"] if full_mode else ["metadatas"],
             )
 
-            metadatas = all_data.get("metadatas", [])
+            metadatas = all_data.get("metadatas", []) or []
             documents = all_data.get("documents", []) if full_mode else []
 
             taxonomy = {}
             wing_counts = {}
-            room_counts = {}
             oldest_ts = None
             newest_ts = None
 
-            for i, m in enumerate(metadatas):
+            for m in metadatas:
                 w = m.get("wing", "unknown")
                 r = m.get("room", "unknown")
                 ts = m.get("created_at", "")
@@ -1489,6 +1603,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 "oldest_drawer": oldest_ts,
                 "newest_drawer": newest_ts,
                 "palace_path": str(self._palace_path),
+                "from_cache": False,
             }
 
             if full_mode and documents:
@@ -1744,6 +1859,76 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             )
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+    def _load_noise_patterns(self) -> List[str]:
+        """Load noise patterns from config or defaults."""
+        default_patterns = [
+            "nothing to save",
+            "no new memories",
+            "no memories to save",
+            "no significant memories",
+            "nothing new to save",
+            "nothing important to save",
+            "no information to save",
+        ]
+        if not self._palace_path:
+            return default_patterns
+
+        config_path = self._palace_path / "noise_patterns.json"
+        if config_path.exists():
+            try:
+                import json as json_lib
+
+                custom = json_lib.loads(config_path.read_text())
+                patterns = custom.get("patterns", [])
+                return patterns + [p for p in default_patterns if p not in patterns]
+            except Exception:
+                pass
+        return default_patterns
+
+    def _save_noise_patterns(self, patterns: List[str]) -> None:
+        """Save noise patterns to config."""
+        if not self._palace_path:
+            return
+        config_path = self._palace_path / "noise_patterns.json"
+        try:
+            import json as json_lib
+
+            config_path.write_text(json_lib.dumps({"patterns": patterns}, indent=2))
+        except Exception:
+            pass
+
+    def _tool_noise_filter(self, args: dict) -> str:
+        """Manage noise filter patterns."""
+        mode = args.get("mode", "list")
+        pattern = args.get("pattern", "").lower().strip()
+
+        patterns = self._load_noise_patterns()
+
+        if mode == "list":
+            return json.dumps({"patterns": patterns, "count": len(patterns)})
+
+        if mode == "add":
+            if not pattern:
+                return json.dumps({"error": "Pattern required for add mode"})
+            if pattern in patterns:
+                return json.dumps({"error": "Pattern already exists"})
+            patterns.append(pattern)
+            self._save_noise_patterns(patterns)
+            self._noise_patterns = patterns
+            return json.dumps({"result": "Pattern added", "pattern": pattern})
+
+        if mode == "remove":
+            if not pattern:
+                return json.dumps({"error": "Pattern required for remove mode"})
+            if pattern not in patterns:
+                return json.dumps({"error": "Pattern not found"})
+            patterns.remove(pattern)
+            self._save_noise_patterns(patterns)
+            self._noise_patterns = patterns
+            return json.dumps({"result": "Pattern removed", "pattern": pattern})
+
+        return json.dumps({"error": "Invalid mode"})
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         self._turn_count = turn_number
