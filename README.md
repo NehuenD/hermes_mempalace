@@ -1,22 +1,16 @@
 # MemPalace Memory Provider Plugin
 
-A local-first AI memory system with palace structure (Wings → Rooms → Closets → Drawers), AAAK compression dialect (30x lossless), and 96.6% recall on LongMemEval benchmark.
+A local-first AI memory system with palace structure (Wings → Rooms → Closets → Drawers). Working on improving it periodically.
 
 ## About
 
-This plugin is an implementation of [MemPalace](https://github.com/milla-jovovich/mempalace) as a memory provider for the Hermes Agent.
-
-**Special thanks to [milla-jovovich](https://github.com/milla-jovovich) and [bensig](https://github.com/bensig) for creating the MemPalace system.**
-
-The underlying MemPalace library provides the palace structure, AAAK compression dialect, ChromaDB/SQLite storage, and mining tools. This plugin bridges MemPalace into Hermes Agent's memory provider interface.
+This plugin is an implementation of [MemPalace](https://github.com/milla-jovovich/mempalace) as a memory provider for the Hermes Agent. This is my own version and I'm working on improving it and optimizing as much as I can. 
 
 ## Features
 
 - **Local-first**: ChromaDB + SQLite, no cloud dependencies, no API key required
 - **Palace Structure**: Hierarchical memory organization with Wings, Rooms, Closets, and Drawers
-- **AAAK Compression**: 30x lossless compression for fast context loading (~170 tokens for full memory)
-- **26 Tools**: Full read/write access to palace, knowledge graph, navigation, diaries, and mistakes registry
-- **96.6% Recall**: Highest published score on LongMemEval benchmark
+- **A Complete Set of Tools**: Full read/write access to palace, knowledge graph, navigation, diaries, and mistakes registry
 - **Auto-Mining**: Automatic conversation chunking and room detection
 
 ## Requirements
@@ -155,19 +149,7 @@ MemPalace organizes memory into a hierarchical structure:
 - **Closets**: Compressed summaries pointing to original content
 - **Drawers**: Original verbatim content
 
-This structure alone provides a **+34% retrieval improvement** over flat search.
 
-## AAAK Compression
-
-AAAK (Autonomous Autonomous Autonomous Knowledge) is a lossless shorthand dialect that compresses memory to ~170 tokens while preserving all information. Works with any LLM that reads text.
-
-## Benchmarks
-
-| Benchmark | Score | Notes |
-|-----------|-------|-------|
-| LongMemEval R@5 | 96.6% | Zero API calls |
-| LongMemEval R@5 (hybrid) | 100% | With Haiku rerank |
-| Palace structure impact | +34% | Wing+room filtering |
 
 ## Testing
 
