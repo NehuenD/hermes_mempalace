@@ -789,7 +789,7 @@ class MempalaceMemoryProvider(MemoryProvider):
 
     def _get_recent_sessions_block(self) -> str:
         """Get recent session entries for wake-up context."""
-        if not self._collection:
+        if not self._ensure_palace():
             return ""
 
         try:
@@ -1365,7 +1365,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_session_write(self, args: dict) -> str:
         """Write a session entry for project tracking across sessions."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
 
         try:
@@ -1390,6 +1390,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 "closet": "hall_events",
                 "session_date": date,
                 "session_type": "project_tracking",
+                "session_project": project,
             }
 
             doc_id = str(uuid.uuid4())
@@ -1413,15 +1414,19 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_session_read(self, args: dict) -> str:
         """Read session entries for project context restoration."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
 
         try:
             project = args.get("project", "")
             last_n = args.get("last_n", 5)
 
+            where_filter = {"wing": "wing_myos", "room": "sessions"}
+            if project:
+                where_filter["session_project"] = project
+
             results = self._collection.get(
-                where={"wing": "wing_myos", "room": "sessions"},
+                where=where_filter,
                 include=["metadatas", "documents"],
             )
 
@@ -1435,7 +1440,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     {
                         "session": doc,
                         "date": meta.get("session_date", ""),
-                        "project": meta.get("project", ""),
+                        "project": meta.get("session_project", ""),
                     }
                 )
 
