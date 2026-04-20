@@ -465,6 +465,61 @@ RECORD_MISTAKE_SCHEMA = {
     },
 }
 
+SESSION_WRITE_SCHEMA = {
+    "name": "mempalace_session_write",
+    "description": (
+        "Write a session entry for project tracking across sessions. "
+        "AAAK format: SESSION → date|project|summary|next. "
+        "Use at session end to record what happened and what's next. "
+        "This is the primary way to maintain multi-session project context."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "date": {
+                "type": "string",
+                "description": "Session date (YYYY-MM-DD, auto-detects if not provided).",
+            },
+            "project": {
+                "type": "string",
+                "description": "Project/activity tag (e.g., 'Collatz:arithprogt3k').",
+            },
+            "summary": {
+                "type": "string",
+                "description": "What happened in this session.",
+            },
+            "next": {
+                "type": "string",
+                "description": "What needs to happen next.",
+            },
+        },
+        "required": ["project", "summary"],
+    },
+}
+
+SESSION_READ_SCHEMA = {
+    "name": "mempalace_session_read",
+    "description": (
+        "Read recent session entries to restore multi-session project context. "
+        "Use at session start to pick up where you left off. "
+        "Returns entries sorted by date (newest first)."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "project": {
+                "type": "string",
+                "description": "Filter by project tag (optional).",
+            },
+            "last_n": {
+                "type": "integer",
+                "description": "Number of recent sessions (default: 5).",
+            },
+        },
+        "required": [],
+    },
+}
+
 NOISE_FILTER_SCHEMA = {
     "name": "mempalace_noise_filter",
     "description": (
@@ -583,6 +638,8 @@ ALL_TOOL_SCHEMAS = [
     GET_AAAK_SPEC_SCHEMA,
     ADD_DRAWER_SCHEMA,
     DELETE_DRAWER_SCHEMA,
+    SESSION_WRITE_SCHEMA,
+    SESSION_READ_SCHEMA,
     KG_QUERY_SCHEMA,
     KG_ADD_SCHEMA,
     KG_INVALIDATE_SCHEMA,
@@ -730,6 +787,33 @@ class MempalaceMemoryProvider(MemoryProvider):
             self._l1_story = "## L1 — ESSENTIAL STORY\nNo palace data yet."
             self._wake_up_context = f"{self._l0_identity}\n\n{self._l1_story}"
 
+    def _get_recent_sessions_block(self) -> str:
+        """Get recent session entries for wake-up context."""
+        if not self._collection:
+            return ""
+
+        try:
+            results = self._collection.get(
+                where={"wing": "wing_myos", "room": "sessions"},
+                include=["documents"],
+            )
+
+            docs = results.get("documents", []) or []
+            if not docs:
+                return ""
+
+            sessions = docs[:5]
+            if not sessions:
+                return ""
+
+            block = "## Recent Sessions\n"
+            for s in sessions:
+                block += f"- {s}\n"
+            return block + "\n"
+        except Exception as e:
+            logger.debug("Failed to get recent sessions: %s", e)
+            return ""
+
     def _ensure_palace(self) -> bool:
         if self._collection is not None:
             return True
@@ -856,6 +940,8 @@ class MempalaceMemoryProvider(MemoryProvider):
             logger.debug("Failed to seed KG: %s", e)
 
     def system_prompt_block(self) -> str:
+        sessions_block = self._get_recent_sessions_block()
+
         aaak_guide = """## AAAK Compression Dialect
 AAAK (Autonomous Autonomous Autonomous Knowledge) is a 30x lossless shorthand format.
 Use structured shorthand to store memories compactly:
@@ -878,7 +964,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 "Use mempalace_search to find stored memories.\n"
                 "Use mempalace_add_drawer with AAAK shorthand for long content.\n"
                 "Use mempalace_kg_add for structured facts (subject-predicate-object triples).\n"
-                "Use mempalace_diary_write in AAAK format for agent observations.\n\n"
+                "Use mempalace_diary_write in AAAK format for agent observations.\n"
+                "Use mempalace_session_write at session end to track multi-session projects.\n"
+                "Use mempalace_session_read at session start to restore project context.\n\n"
+                + sessions_block
                 + aaak_guide
             )
         return (
@@ -887,7 +976,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             "When user asks to 'remember', use mempalace_remember.\n"
             "Use mempalace_search to find information.\n"
             "Use mempalace_kg_add for structured facts.\n"
-            "Use mempalace_diary_write in AAAK shorthand for observations.\n\n"
+            "Use mempalace_diary_write in AAAK shorthand for observations.\n"
+            "Use mempalace_session_write at session end to track multi-session projects.\n"
+            "Use mempalace_session_read at session start to restore project context.\n\n"
+            + sessions_block
             + aaak_guide
         )
 
@@ -1039,6 +1131,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_get_aaak_spec()
             elif tool_name == "mempalace_add_drawer":
                 return self._tool_add_drawer(args)
+            elif tool_name == "mempalace_session_write":
+                return self._tool_session_write(args)
+            elif tool_name == "mempalace_session_read":
+                return self._tool_session_read(args)
             elif tool_name == "mempalace_remember":
                 return self._tool_remember(args)
             elif tool_name == "mempalace_delete_drawer":
@@ -1264,6 +1360,89 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     "expires_at": expires_at,
                 }
             )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_session_write(self, args: dict) -> str:
+        """Write a session entry for project tracking across sessions."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+
+        try:
+            import uuid
+            from datetime import datetime
+
+            date = args.get("date", "")
+            project = args.get("project", "")
+            summary = args.get("summary", "")
+            next_task = args.get("next", "")
+
+            if not date:
+                date = datetime.now().strftime("%Y-%m-%d")
+
+            aaak_entry = f"SESSION → {date}|{project}|{summary}"
+            if next_task:
+                aaak_entry += f"|next:{next_task}"
+
+            metadata = {
+                "wing": "wing_myos",
+                "room": "sessions",
+                "closet": "hall_events",
+                "session_date": date,
+                "session_type": "project_tracking",
+            }
+
+            doc_id = str(uuid.uuid4())
+            self._collection.add(
+                documents=[aaak_entry],
+                metadatas=[metadata],
+                ids=[doc_id],
+            )
+            self._update_taxonomy_cache("wing_myos", "sessions", 1)
+
+            return json.dumps(
+                {
+                    "result": "Session entry written",
+                    "drawer_id": doc_id,
+                    "date": date,
+                    "project": project,
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_session_read(self, args: dict) -> str:
+        """Read session entries for project context restoration."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+
+        try:
+            project = args.get("project", "")
+            last_n = args.get("last_n", 5)
+
+            results = self._collection.get(
+                where={"wing": "wing_myos", "room": "sessions"},
+                include=["metadatas", "documents"],
+            )
+
+            items = []
+            docs = results.get("documents", []) or []
+            metas = results.get("metadatas", []) or []
+
+            for i, doc in enumerate(docs):
+                meta = metas[i] if i < len(metas) else {}
+                items.append(
+                    {
+                        "session": doc,
+                        "date": meta.get("session_date", ""),
+                        "project": meta.get("project", ""),
+                    }
+                )
+
+            items.sort(key=lambda x: x["date"], reverse=True)
+            items = items[:last_n]
+
+            return json.dumps({"sessions": items, "count": len(items)})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
