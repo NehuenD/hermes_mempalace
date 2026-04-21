@@ -794,7 +794,7 @@ class MempalaceMemoryProvider(MemoryProvider):
 
         try:
             results = self._collection.get(
-                where={"wing": "wing_myos", "room": "sessions"},
+                where={"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]},
                 include=["documents"],
             )
 
@@ -1421,9 +1421,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             project = args.get("project", "")
             last_n = args.get("last_n", 5)
 
-            where_filter = {"wing": "wing_myos", "room": "sessions"}
+            where_filter = {"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]}
             if project:
-                where_filter["session_project"] = project
+                where_filter["$and"].append({"session_project": project})
 
             results = self._collection.get(
                 where=where_filter,
