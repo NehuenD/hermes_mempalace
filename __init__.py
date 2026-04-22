@@ -117,7 +117,20 @@ STATUS_SCHEMA = {
 LIST_WINGS_SCHEMA = {
     "name": "mempalace_list_wings",
     "description": "List all wings in the palace with drawer counts.",
-    "parameters": {"type": "object", "properties": {}, "required": []},
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "offset": {
+                "type": "integer",
+                "description": "Number of wings to skip (for pagination).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max wings to return (default: 50).",
+            },
+        },
+        "required": [],
+    },
 }
 
 LIST_ROOMS_SCHEMA = {
@@ -127,6 +140,14 @@ LIST_ROOMS_SCHEMA = {
         "type": "object",
         "properties": {
             "wing": {"type": "string", "description": "Wing name to list rooms for."},
+            "offset": {
+                "type": "integer",
+                "description": "Number of rooms to skip (for pagination).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max rooms to return (default: 50).",
+            },
         },
         "required": ["wing"],
     },
@@ -135,7 +156,20 @@ LIST_ROOMS_SCHEMA = {
 GET_TAXONOMY_SCHEMA = {
     "name": "mempalace_get_taxonomy",
     "description": "Get the full wing → room → count taxonomy tree.",
-    "parameters": {"type": "object", "properties": {}, "required": []},
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "offset": {
+                "type": "integer",
+                "description": "Number of entries to skip (for pagination).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max entries to return (default: 100).",
+            },
+        },
+        "required": [],
+    },
 }
 
 SEARCH_SCHEMA = {
@@ -154,6 +188,10 @@ SEARCH_SCHEMA = {
             },
             "wing": {"type": "string", "description": "Optional wing to scope search."},
             "room": {"type": "string", "description": "Optional room to scope search."},
+            "offset": {
+                "type": "integer",
+                "description": "Number of results to skip (for pagination).",
+            },
             "limit": {"type": "integer", "description": "Max results (default: 10)."},
         },
         "required": ["query"],
@@ -346,6 +384,38 @@ KG_STATS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
+KG_EXPLORE_SCHEMA = {
+    "name": "mempalace_kg_explore",
+    "description": (
+        "Explore the knowledge graph directionally from an entity. "
+        "Traverse outgoing (subject->predicate->object) or incoming (object<-subject) relations. "
+        "Returns entities and their relationships at each depth level."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "entity": {
+                "type": "string",
+                "description": "Starting entity to explore from.",
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["out", "in", "both"],
+                "description": "Traversal direction: out (subject->), in (<-object), both (default: both).",
+            },
+            "depth": {
+                "type": "integer",
+                "description": "Max depth to traverse (default: 2).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results per depth (default: 20).",
+            },
+        },
+        "required": ["entity"],
+    },
+}
+
 REMEMBER_FACT_SCHEMA = {
     "name": "mempalace_remember_fact",
     "description": (
@@ -412,6 +482,34 @@ SET_DRAWER_FLAGS_SCHEMA = {
             },
         },
         "required": ["drawer_id", "flags"],
+    },
+}
+
+WATCH_SCHEMA = {
+    "name": "mempalace_watch",
+    "description": (
+        "Watch a query and get notified when matching drawers change. "
+        "Returns a list of current matches. Use periodically to check for changes."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Query to watch (similar to search query).",
+            },
+            "wing": {"type": "string", "description": "Optional wing to scope."},
+            "room": {"type": "string", "description": "Optional room to scope."},
+            "watch_id": {
+                "type": "string",
+                "description": "Optional watch ID from previous call to check for changes.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results (default: 10).",
+            },
+        },
+        "required": ["query"],
     },
 }
 
@@ -827,9 +925,11 @@ ALL_TOOL_SCHEMAS = [
     KG_INVALIDATE_SCHEMA,
     KG_TIMELINE_SCHEMA,
     KG_STATS_SCHEMA,
+    KG_EXPLORE_SCHEMA,
     REMEMBER_FACT_SCHEMA,
     PREVIEW_AAAK_SCHEMA,
     SET_DRAWER_FLAGS_SCHEMA,
+    WATCH_SCHEMA,
     TRAVERSE_SCHEMA,
     FIND_TUNNELS_SCHEMA,
     GRAPH_STATS_SCHEMA,
@@ -868,6 +968,7 @@ class MempalaceMemoryProvider(MemoryProvider):
         self._kg = None
         self._taxonomy_cache: Dict[str, Dict[str, int]] = {}
         self._noise_patterns: List[str] = []
+        self._watch_cache: Dict[str, dict] = {}
         self._prefetch_result = ""
         self._prefetch_lock = threading.Lock()
         self._prefetch_thread: Optional[threading.Thread] = None
@@ -1307,11 +1408,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             if tool_name == "mempalace_status":
                 return self._tool_status()
             elif tool_name == "mempalace_list_wings":
-                return self._tool_list_wings()
+                return self._tool_list_wings(args)
             elif tool_name == "mempalace_list_rooms":
-                return self._tool_list_rooms(args.get("wing", ""))
+                return self._tool_list_rooms(args)
             elif tool_name == "mempalace_get_taxonomy":
-                return self._tool_get_taxonomy()
+                return self._tool_get_taxonomy(args)
             elif tool_name == "mempalace_search":
                 return self._tool_search(args)
             elif tool_name == "mempalace_check_duplicate":
@@ -1338,12 +1439,16 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_kg_timeline(args)
             elif tool_name == "mempalace_kg_stats":
                 return self._tool_kg_stats()
+            elif tool_name == "mempalace_kg_explore":
+                return self._tool_kg_explore(args)
             elif tool_name == "mempalace_remember_fact":
                 return self._tool_remember_fact(args)
             elif tool_name == "mempalace_preview_aaak":
                 return self._tool_preview_aaak(args)
             elif tool_name == "mempalace_set_drawer_flags":
                 return self._tool_set_drawer_flags(args)
+            elif tool_name == "mempalace_watch":
+                return self._tool_watch(args)
             elif tool_name == "mempalace_traverse":
                 return self._tool_traverse(args)
             elif tool_name == "mempalace_find_tunnels":
@@ -1398,23 +1503,43 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def _tool_list_wings(self) -> str:
+    def _tool_list_wings(self, args: dict = None) -> str:
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
+            args = args or {}
+            offset = args.get("offset", 0)
+            limit = args.get("limit", 50)
+
             all_data = self._collection.get(include=["metadatas"])
             wings = {}
             for m in all_data.get("metadatas", []):
                 w = m.get("wing", "unknown")
                 wings[w] = wings.get(w, 0) + 1
-            return json.dumps({"wings": wings})
+
+            sorted_wings = sorted(wings.items(), key=lambda x: -x[1])
+            total = len(sorted_wings)
+            paginated = sorted_wings[offset : offset + limit]
+
+            return json.dumps(
+                {
+                    "wings": dict(paginated),
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def _tool_list_rooms(self, wing: str) -> str:
+    def _tool_list_rooms(self, args: dict) -> str:
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
+            wing = args.get("wing", "")
+            offset = args.get("offset", 0)
+            limit = args.get("limit", 50)
+
             results = self._collection.get(
                 where={"wing": wing} if wing else None, include=["metadatas"]
             )
@@ -1422,15 +1547,49 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             for m in results.get("metadatas", []):
                 r = m.get("room", "unknown")
                 rooms[r] = rooms.get(r, 0) + 1
-            return json.dumps({"wing": wing, "rooms": rooms})
+
+            sorted_rooms = sorted(rooms.items(), key=lambda x: -x[1])
+            total = len(sorted_rooms)
+            paginated = sorted_rooms[offset : offset + limit]
+
+            return json.dumps(
+                {
+                    "wing": wing,
+                    "rooms": dict(paginated),
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def _tool_get_taxonomy(self) -> str:
+    def _tool_get_taxonomy(self, args: dict = None) -> str:
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
-            return json.dumps({"taxonomy": self._taxonomy_cache})
+            args = args or {}
+            offset = args.get("offset", 0)
+            limit = args.get("limit", 100)
+
+            taxonomy = dict(self._taxonomy_cache)
+            all_entries = []
+            for wing, rooms in taxonomy.items():
+                for room, count in rooms.items():
+                    all_entries.append({"wing": wing, "room": room, "count": count})
+
+            total = len(all_entries)
+            paginated = all_entries[offset : offset + limit]
+
+            return json.dumps(
+                {
+                    "taxonomy": taxonomy,
+                    "entries": paginated,
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -1443,6 +1602,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             query = args.get("query", "")
             wing = args.get("wing")
             room = args.get("room")
+            offset = args.get("offset", 0)
             limit = args.get("limit", 10)
 
             where_filter = None
@@ -1453,7 +1613,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             elif room:
                 where_filter = {"room": room}
 
-            n_to_fetch = limit * 5 if (wing or room) else limit
+            n_to_fetch = (offset + limit) * 5 if (wing or room) else offset + limit
 
             try:
                 results = search_memories(
@@ -1483,9 +1643,18 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         "room": r_room,
                     }
                 )
-                if len(items) >= limit:
-                    break
-            return json.dumps({"results": items, "count": len(items)})
+
+            total = len(items)
+            paginated = items[offset : offset + limit]
+            return json.dumps(
+                {
+                    "results": paginated,
+                    "count": len(paginated),
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
         except ImportError:
             return json.dumps({"error": "mempalace searcher not available"})
         except Exception as e:
@@ -1769,6 +1938,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             }
 
             stored = []
+            kg_stored = []
             for chunk in extracted:
                 memory_type = chunk.get("memory_type", "general")
                 room, closet = room_map.get(memory_type, ("general", "hall_events"))
@@ -1788,14 +1958,34 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 )
                 stored.append({"type": memory_type, "drawer_id": doc_id})
 
-            return json.dumps(
-                {
-                    "result": "Remembered",
-                    "extracted": True,
-                    "memories": stored,
-                    "count": len(stored),
-                }
-            )
+                if self._kg and memory_type in ["fact", "preference", "decision"]:
+                    try:
+                        subject, predicate, obj = self._parse_natural_fact(
+                            chunk["content"]
+                        )
+                        if subject and predicate and obj:
+                            self._kg.add_triple(subject, predicate, obj)
+                            kg_stored.append(
+                                {
+                                    "subject": subject,
+                                    "predicate": predicate,
+                                    "object": obj,
+                                }
+                            )
+                    except Exception:
+                        pass
+
+            result = {
+                "result": "Remembered",
+                "extracted": True,
+                "memories": stored,
+                "count": len(stored),
+            }
+            if kg_stored:
+                result["kg_triples"] = kg_stored
+                result["kg_count"] = len(kg_stored)
+
+            return json.dumps(result)
 
         except ImportError:
             return json.dumps(
@@ -1871,6 +2061,87 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         try:
             stats = self._kg.stats()
             return json.dumps({"stats": stats})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_kg_explore(self, args: dict) -> str:
+        if not self._kg:
+            return json.dumps({"error": "Knowledge graph not available"})
+        try:
+            entity = args.get("entity", "")
+            direction = args.get("direction", "both")
+            depth = args.get("depth", 2)
+            limit = args.get("limit", 20)
+
+            if not entity:
+                return json.dumps({"error": "entity is required"})
+
+            visited = set()
+            current_level = [entity]
+            results_by_depth = []
+
+            for d in range(1, depth + 1):
+                next_level = []
+                level_results = []
+
+                for current_entity in current_level:
+                    if current_entity in visited:
+                        continue
+                    visited.add(current_entity)
+
+                    triples = self._kg.query_entity(current_entity)
+                    if not triples:
+                        triples = []
+
+                    for t in triples[:limit]:
+                        t_subject = t.get("subject", "")
+                        t_predicate = t.get("predicate", "")
+                        t_object = t.get("object", "")
+
+                        if direction in ["out", "both"]:
+                            if t_subject == current_entity:
+                                level_results.append(
+                                    {
+                                        "from": current_entity,
+                                        "predicate": t_predicate,
+                                        "to": t_object,
+                                        "direction": "out",
+                                    }
+                                )
+                                next_level.append(t_object)
+
+                        if direction in ["in", "both"]:
+                            if t_object == current_entity:
+                                level_results.append(
+                                    {
+                                        "from": t_subject,
+                                        "predicate": t_predicate,
+                                        "to": current_entity,
+                                        "direction": "in",
+                                    }
+                                )
+                                next_level.append(t_subject)
+
+                results_by_depth.append(
+                    {
+                        "depth": d,
+                        "entities": level_results,
+                        "count": len(level_results),
+                    }
+                )
+
+                current_level = list(set(next_level))[:limit]
+                if not current_level:
+                    break
+
+            return json.dumps(
+                {
+                    "entity": entity,
+                    "direction": direction,
+                    "depth": depth,
+                    "results": results_by_depth,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -2050,6 +2321,98 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     "drawer_id": drawer_id,
                     "flags": new_flags,
                     "mode": mode,
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_watch(self, args: dict) -> str:
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            import hashlib
+            import uuid
+
+            query = args.get("query", "")
+            wing = args.get("wing")
+            room = args.get("room")
+            watch_id = args.get("watch_id")
+            limit = args.get("limit", 10)
+
+            where_filter = None
+            if wing and room:
+                where_filter = {"$and": [{"wing": wing}, {"room": room}]}
+            elif wing:
+                where_filter = {"wing": wing}
+            elif room:
+                where_filter = {"room": room}
+
+            if not watch_id:
+                watch_id = str(uuid.uuid4())
+
+            try:
+                from mempalace.searcher import search_memories
+
+                n_to_fetch = limit * 5
+                results = search_memories(
+                    query,
+                    palace_path=str(self._palace_path),
+                    n_results=n_to_fetch,
+                )
+                raw_results = (
+                    results.get("results", []) if isinstance(results, dict) else results
+                )
+            except Exception:
+                raw_results = []
+
+            items = []
+            for r in raw_results:
+                r_wing = r.get("wing", "")
+                r_room = r.get("room", "")
+                if wing and r_wing != wing:
+                    continue
+                if room and r_room != room:
+                    continue
+                content = r.get("text", r.get("content", ""))
+                content_hash = hashlib.md5(content.encode()).hexdigest()[:12]
+                items.append(
+                    {
+                        "drawer_id": r.get("id", ""),
+                        "content": content[:200],
+                        "content_hash": content_hash,
+                        "wing": r_wing,
+                        "room": r_room,
+                    }
+                )
+
+            total = len(items)
+            current_ids = set(i["drawer_id"] for i in items[:limit])
+
+            stored = self._watch_cache.get(watch_id, {})
+            previous_ids = stored.get("drawer_ids", set())
+            added = current_ids - previous_ids
+            removed = previous_ids - current_ids
+
+            self._watch_cache[watch_id] = {
+                "query": query,
+                "wing": wing,
+                "room": room,
+                "drawer_ids": current_ids,
+                "timestamp": str(uuid.uuid4()),
+            }
+
+            return json.dumps(
+                {
+                    "watch_id": watch_id,
+                    "results": items[:limit],
+                    "count": len(items[:limit]),
+                    "total": total,
+                    "changes": {
+                        "added": len(added),
+                        "removed": len(removed),
+                        "added_ids": list(added)[:5],
+                        "removed_ids": list(removed)[:5],
+                    },
                 }
             )
         except Exception as e:
