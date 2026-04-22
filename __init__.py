@@ -346,6 +346,75 @@ KG_STATS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
+REMEMBER_FACT_SCHEMA = {
+    "name": "mempalace_remember_fact",
+    "description": (
+        "Add a fact to the knowledge graph using natural language. "
+        "Parses sentences like 'Nehuen lives in Argentina' into (subject, predicate, object). "
+        "Supports patterns: 'X is a Y', 'X has Y', 'X lives in Y', 'X works as Y', etc."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "fact": {
+                "type": "string",
+                "description": "A fact in natural language, e.g., 'Nehuen lives in Argentina' or 'Python is a programming language'.",
+            },
+            "valid_from": {
+                "type": "string",
+                "description": "Start date for temporal validity (YYYY-MM-DD, default: today).",
+            },
+        },
+        "required": ["fact"],
+    },
+}
+
+PREVIEW_AAAK_SCHEMA = {
+    "name": "mempalace_preview_aaak",
+    "description": (
+        "Preview how content would be compressed using AAAK format without saving. "
+        "Use before mempalace_add_drawer to see the compressed output and decide whether to save."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "Content to preview AAAK compression on.",
+            },
+        },
+        "required": ["content"],
+    },
+}
+
+SET_DRAWER_FLAGS_SCHEMA = {
+    "name": "mempalace_set_drawer_flags",
+    "description": (
+        "Set flags/tags on a drawer for organization and filtering. "
+        "Flags are user-defined labels like 'important', 'review', 'archived', etc."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "drawer_id": {
+                "type": "string",
+                "description": "The drawer ID to tag.",
+            },
+            "flags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of flag strings to set on the drawer.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["set", "add", "remove"],
+                "description": "Mode: set (replace all), add (append), or remove (delete).",
+            },
+        },
+        "required": ["drawer_id", "flags"],
+    },
+}
+
 TRAVERSE_SCHEMA = {
     "name": "mempalace_traverse",
     "description": (
@@ -758,6 +827,9 @@ ALL_TOOL_SCHEMAS = [
     KG_INVALIDATE_SCHEMA,
     KG_TIMELINE_SCHEMA,
     KG_STATS_SCHEMA,
+    REMEMBER_FACT_SCHEMA,
+    PREVIEW_AAAK_SCHEMA,
+    SET_DRAWER_FLAGS_SCHEMA,
     TRAVERSE_SCHEMA,
     FIND_TUNNELS_SCHEMA,
     GRAPH_STATS_SCHEMA,
@@ -1266,6 +1338,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_kg_timeline(args)
             elif tool_name == "mempalace_kg_stats":
                 return self._tool_kg_stats()
+            elif tool_name == "mempalace_remember_fact":
+                return self._tool_remember_fact(args)
+            elif tool_name == "mempalace_preview_aaak":
+                return self._tool_preview_aaak(args)
+            elif tool_name == "mempalace_set_drawer_flags":
+                return self._tool_set_drawer_flags(args)
             elif tool_name == "mempalace_traverse":
                 return self._tool_traverse(args)
             elif tool_name == "mempalace_find_tunnels":
@@ -1793,6 +1871,187 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         try:
             stats = self._kg.stats()
             return json.dumps({"stats": stats})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_remember_fact(self, args: dict) -> str:
+        if not self._kg:
+            return json.dumps({"error": "Knowledge graph not available"})
+        try:
+            fact = args.get("fact", "").strip()
+            if not fact:
+                return json.dumps({"error": "fact is required"})
+
+            valid_from = args.get("valid_from", "")
+            if not valid_from:
+                from datetime import datetime
+
+                valid_from = datetime.now().strftime("%Y-%m-%d")
+
+            subject, predicate, obj = self._parse_natural_fact(fact)
+            if not subject or not predicate or not obj:
+                return json.dumps(
+                    {
+                        "error": "Could not parse fact. Try patterns like 'X is a Y', 'X lives in Y', 'X works as Y'.",
+                        "parsed": {
+                            "subject": subject,
+                            "predicate": predicate,
+                            "object": obj,
+                        },
+                    }
+                )
+
+            self._kg.add_triple(subject, predicate, obj, valid_from=valid_from)
+            return json.dumps(
+                {
+                    "result": "Fact added",
+                    "parsed": {
+                        "subject": subject,
+                        "predicate": predicate,
+                        "object": obj,
+                    },
+                    "valid_from": valid_from,
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _parse_natural_fact(self, fact: str) -> tuple:
+        import re
+
+        fact = fact.strip()
+        fact_lower = fact.lower()
+
+        patterns = [
+            (r"^(.+) lives in (.+)$", "lives_in"),
+            (r"^(.+) works as (.+)$", "works_as"),
+            (r"^(.+) is a (.+)$", "is_a"),
+            (r"^(.+) is an (.+)$", "is_a"),
+            (r"^(.+) is the (.+)$", "is_the"),
+            (r"^(.+) has (.+)$", "has"),
+            (r"^(.+) loves (.+)$", "loves"),
+            (r"^(.+) likes (.+)$", "likes"),
+            (r"^(.+) created (.+)$", "created"),
+            (r"^(.+) owns (.+)$", "owns"),
+            (r"^(.+) knows (.+)$", "knows"),
+            (r"^(.+) was born in (.+)$", "born_in"),
+            (r"^(.+) is from (.+)$", "is_from"),
+        ]
+
+        for pattern, predicate in patterns:
+            match = re.match(pattern, fact_lower)
+            if match:
+                subject = match.group(1).strip()
+                obj = match.group(2).strip()
+                subject = fact[: len(subject)].strip()
+                if subject[0].isupper():
+                    subject = subject[0].upper() + subject[1:]
+                return (subject, predicate, obj)
+
+        parts = fact.split()
+        if len(parts) >= 3:
+            if parts[1].lower() in ["is", "are", "was", "were"]:
+                subject = parts[0]
+                predicate = parts[1].lower()
+                obj = " ".join(parts[2:])
+                return (subject, predicate, obj)
+
+        return ("", "", "")
+
+    def _tool_preview_aaak(self, args: dict) -> str:
+        content = args.get("content", "")
+        if not content:
+            return json.dumps({"error": "content is required"})
+
+        try:
+            aaak_preview = self._compress_aaak(content)
+            original_len = len(content)
+            compressed_len = len(aaak_preview)
+            ratio = original_len / compressed_len if compressed_len > 0 else 0
+
+            return json.dumps(
+                {
+                    "original": content,
+                    "aaak": aaak_preview,
+                    "original_length": original_len,
+                    "compressed_length": compressed_len,
+                    "compression_ratio": round(ratio, 2),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _compress_aaak(self, content: str) -> str:
+        lines = [l.strip() for l in content.split("\n") if l.strip()]
+        if not lines:
+            return content
+
+        if len(lines) == 1:
+            return content
+
+        chunks = []
+        current_chunk = []
+        current_len = 0
+
+        for line in lines:
+            if current_len + len(line) > 80 and current_chunk:
+                chunks.append("|".join(current_chunk))
+                current_chunk = [line]
+                current_len = len(line)
+            else:
+                current_chunk.append(line)
+                current_len += len(line) + 1
+
+        if current_chunk:
+            chunks.append("|".join(current_chunk))
+
+        return "\n".join(chunks)
+
+    def _tool_set_drawer_flags(self, args: dict) -> str:
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            drawer_id = args.get("drawer_id", "")
+            flags = args.get("flags", [])
+            mode = args.get("mode", "set")
+
+            if not drawer_id:
+                return json.dumps({"error": "drawer_id is required"})
+
+            results = self._collection.get(ids=[drawer_id])
+            existing = results.get("metadatas", [])
+            if not existing:
+                return json.dumps({"error": "Drawer not found"})
+
+            existing_meta = existing[0]
+            existing_flags = existing_meta.get("flags", "")
+            current_flags = existing_flags.split(",") if existing_flags else []
+
+            if mode == "set":
+                new_flags = flags
+            elif mode == "add":
+                new_flags = list(set(current_flags + flags))
+            elif mode == "remove":
+                new_flags = [f for f in current_flags if f not in flags]
+            else:
+                new_flags = flags
+
+            new_meta = dict(existing_meta)
+            new_meta["flags"] = ",".join(new_flags)
+
+            self._collection.update(
+                ids=[drawer_id],
+                metadatas=[new_meta],
+            )
+
+            return json.dumps(
+                {
+                    "result": "Flags updated",
+                    "drawer_id": drawer_id,
+                    "flags": new_flags,
+                    "mode": mode,
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
