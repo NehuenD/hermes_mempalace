@@ -283,6 +283,28 @@ DELETE_DRAWER_SCHEMA = {
     },
 }
 
+GET_VERSIONS_SCHEMA = {
+    "name": "mempalace_get_versions",
+    "description": (
+        "Get the version chain for a drawer via parent_id links. "
+        "Shows all versions from current to original."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "drawer_id": {
+                "type": "string",
+                "description": "The drawer ID to get versions for.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max versions to return (default: 20).",
+            },
+        },
+        "required": ["drawer_id"],
+    },
+}
+
 REMEMBER_SCHEMA = {
     "name": "mempalace_remember",
     "description": (
@@ -918,6 +940,7 @@ ALL_TOOL_SCHEMAS = [
     GET_AAAK_SPEC_SCHEMA,
     ADD_DRAWER_SCHEMA,
     DELETE_DRAWER_SCHEMA,
+    GET_VERSIONS_SCHEMA,
     SESSION_WRITE_SCHEMA,
     SESSION_READ_SCHEMA,
     KG_QUERY_SCHEMA,
@@ -1429,6 +1452,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_remember(args)
             elif tool_name == "mempalace_delete_drawer":
                 return self._tool_delete_drawer(args)
+            elif tool_name == "mempalace_get_versions":
+                return self._tool_get_versions(args)
             elif tool_name == "mempalace_kg_query":
                 return self._tool_kg_query(args)
             elif tool_name == "mempalace_kg_add":
@@ -2005,6 +2030,60 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             self._collection.delete(ids=[drawer_id])
             self._build_taxonomy_cache()
             return json.dumps({"result": "Drawer deleted"})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_get_versions(self, args: dict) -> str:
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            drawer_id = args.get("drawer_id", "")
+            limit = args.get("limit", 20)
+
+            if not drawer_id:
+                return json.dumps({"error": "drawer_id is required"})
+
+            results = self._collection.get(ids=[drawer_id])
+            docs = results.get("documents", []) or []
+            metas = results.get("metadatas", []) or []
+            ids = results.get("ids", []) or []
+
+            if not ids:
+                return json.dumps({"error": "Drawer not found"})
+
+            versions = []
+            current_id = drawer_id
+
+            while current_id and len(versions) < limit:
+                results = self._collection.get(ids=[current_id])
+                d = results.get("documents", []) or []
+                m = results.get("metadatas", []) or []
+                i = results.get("ids", []) or []
+
+                if not i:
+                    break
+
+                doc = d[0] if d else ""
+                meta = m[0] if m else {}
+                versions.append(
+                    {
+                        "drawer_id": i[0],
+                        "document": doc[:100] + "..." if len(doc) > 100 else doc,
+                        "parent_id": meta.get("parent_id", ""),
+                        "created_at": meta.get("created_at", ""),
+                    }
+                )
+
+                current_id = meta.get("parent_id", "")
+
+            versions.reverse()
+            return json.dumps(
+                {
+                    "drawer_id": drawer_id,
+                    "versions": versions,
+                    "count": len(versions),
+                }
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -2904,19 +2983,21 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 datetime.now(timezone.utc) + timedelta(days=days_ahead)
             ).isoformat()
 
-            where_filter = {"room": "sessions"}
+            where_filter = {}
             if wing:
-                where_filter = {"$and": [{"wing": wing}, {"room": "sessions"}]}
+                where_filter["wing"] = wing
+            if room:
+                where_filter["room"] = room
 
-            where_base = {"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]}
             results = self._collection.get(
-                where=where_base if not wing else where_filter,
-                include=["documents", "metadatas"],
+                where=where_filter if where_filter else None,
+                include=["documents", "metadatas", "ids"],
             )
 
             expiring = []
             docs = results.get("documents", []) or []
             metas = results.get("metadatas", []) or []
+            ids = results.get("ids", []) or []
 
             for i, meta in enumerate(metas):
                 expires_at = meta.get("expires_at", "")
@@ -2932,12 +3013,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     continue
                 expiring.append(
                     {
+                        "drawer_id": ids[i] if i < len(ids) else "",
                         "document": docs[i] if i < len(docs) else "",
                         "expires_at": expires_at,
                         "wing": r_wing,
                         "room": r_room,
                         "closet": meta.get("closet", ""),
-                        "session_project": meta.get("session_project", ""),
                     }
                 )
 
@@ -3115,29 +3196,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             if not before_date:
                 before_date = now.strftime("%Y-%m-%d")
 
-            if not project:
-                results = self._collection.get(
-                    where={"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]},
-                    include=["documents", "metadatas"],
-                )
-                metas = results.get("metadatas", []) or []
-                projects = set()
-                for m in metas:
-                    p = m.get("session_project", "")
-                    if p:
-                        projects.add(p)
-                if projects:
-                    project = sorted(projects)[-1]
-                else:
-                    return json.dumps({"message": "No projects found"})
-
-            where_filter = {
-                "$and": [
-                    {"wing": "wing_myos"},
-                    {"room": "sessions"},
-                    {"session_project": project},
-                ]
-            }
+            where_filter = {"wing": "wing_myos", "room": "sessions"}
+            if project:
+                where_filter["session_project"] = project
 
             results = self._collection.get(
                 where=where_filter,
@@ -3150,22 +3211,29 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             metas = results.get("metadatas", []) or []
 
             for i, meta in enumerate(metas):
+                s_project = meta.get("session_project", "")
+                if project and s_project != project:
+                    continue
+
                 session_date = meta.get("session_date", "")
                 if not session_date:
                     continue
                 doc = docs[i] if i < len(docs) else ""
-                entry = {"date": session_date, "summary": doc, "project": project}
 
                 try:
                     date_obj = datetime.fromisoformat(
                         session_date.replace("Z", "+00:00")
                     )
-                    if date_obj.strftime("%Y-%m-%d") <= after_date:
-                        after_sessions.append(entry)
-                    elif date_obj.strftime("%Y-%m-%d") <= before_date:
-                        before_sessions.append(entry)
+                    date_str = date_obj.strftime("%Y-%m-%d")
                 except Exception:
-                    pass
+                    date_str = session_date[:10] if session_date else ""
+
+                entry = {"date": date_str, "summary": doc, "project": s_project}
+
+                if date_str <= after_date:
+                    after_sessions.append(entry)
+                elif date_str <= before_date:
+                    before_sessions.append(entry)
 
             new_entries = [s for s in after_sessions if s not in before_sessions]
             old_entries = [s for s in before_sessions if s not in after_sessions]
