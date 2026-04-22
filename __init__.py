@@ -224,6 +224,10 @@ ADD_DRAWER_SCHEMA = {
                 "type": "string",
                 "description": "ISO timestamp for explicit expiry override.",
             },
+            "parent_id": {
+                "type": "string",
+                "description": "ID of the parent drawer this replaces (for versioning).",
+            },
         },
         "required": ["content", "wing"],
     },
@@ -543,6 +547,115 @@ NOISE_FILTER_SCHEMA = {
     },
 }
 
+EXPIRING_SCHEMA = {
+    "name": "mempalace_expiring",
+    "description": (
+        "Preview drawers that are about to expire based on TTL. "
+        "Shows what will disappear before the next TTL sweep so you can rescue or extend them."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "days_ahead": {
+                "type": "integer",
+                "description": "Show drawers expiring within this many days (default: 7).",
+            },
+            "wing": {
+                "type": "string",
+                "description": "Filter by wing (optional).",
+            },
+            "room": {
+                "type": "string",
+                "description": "Filter by room (optional).",
+            },
+            "rescue": {
+                "type": "boolean",
+                "description": "If true, extend TTL for listed drawers by ttl_days (default: 90).",
+            },
+            "ttl_days": {
+                "type": "integer",
+                "description": "Days to extend TTL when rescue=true (default: 90).",
+            },
+        },
+        "required": [],
+    },
+}
+
+BACKUP_SCHEMA = {
+    "name": "mempalace_backup",
+    "description": (
+        "Export all palace drawers to a JSON backup file. "
+        "Backs up documents, metadata (wing, room, closet, expires_at, session_date, session_project), and KG triples. "
+        "Use before schema migrations or before a TTL sweep."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Backup file path (default: ~/.mempalace/backups/backup_YYYYMMDD.json).",
+            },
+            "include_kg": {
+                "type": "boolean",
+                "description": "Include KG triples in backup (default: true).",
+            },
+        },
+        "required": [],
+    },
+}
+
+RESTORE_SCHEMA = {
+    "name": "mempalace_restore",
+    "description": (
+        "Restore palace from a JSON backup file. "
+        "Restores drawers and optionally KG triples. Use after data loss or before loading a backup."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to backup file to restore from.",
+            },
+            "clear_first": {
+                "type": "boolean",
+                "description": "Clear existing palace before restoring (default: false).",
+            },
+            "include_kg": {
+                "type": "boolean",
+                "description": "Restore KG triples from backup (default: true).",
+            },
+        },
+        "required": ["path"],
+    },
+}
+
+SESSION_DIFF_SCHEMA = {
+    "name": "mempalace_session_diff",
+    "description": (
+        "Show what changed between two sessions by comparing their summaries. "
+        "Returns added, removed, and modified entries based on session_project and date range."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "project": {
+                "type": "string",
+                "description": "Project to diff (optional, defaults to most recent active project).",
+            },
+            "before_date": {
+                "type": "string",
+                "description": "Compare sessions before this date (YYYY-MM-DD, default: 7 days ago).",
+            },
+            "after_date": {
+                "type": "string",
+                "description": "Compare sessions after this date (YYYY-MM-DD, default: today).",
+            },
+        },
+        "required": [],
+    },
+}
+
 DIARY_WRITE_SCHEMA = {
     "name": "mempalace_diary_write",
     "description": (
@@ -658,6 +771,10 @@ ALL_TOOL_SCHEMAS = [
     SEARCH_MISTAKES_SCHEMA,
     RECALL_MISTAKES_SCHEMA,
     NOISE_FILTER_SCHEMA,
+    EXPIRING_SCHEMA,
+    BACKUP_SCHEMA,
+    RESTORE_SCHEMA,
+    SESSION_DIFF_SCHEMA,
 ]
 
 
@@ -1173,6 +1290,14 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_recall_mistakes(args)
             elif tool_name == "mempalace_noise_filter":
                 return self._tool_noise_filter(args)
+            elif tool_name == "mempalace_expiring":
+                return self._tool_expiring(args)
+            elif tool_name == "mempalace_backup":
+                return self._tool_backup(args)
+            elif tool_name == "mempalace_restore":
+                return self._tool_restore(args)
+            elif tool_name == "mempalace_session_diff":
+                return self._tool_session_diff(args)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1242,15 +1367,29 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             room = args.get("room")
             limit = args.get("limit", 10)
 
-            results = search_memories(
-                query,
-                palace_path=str(self._palace_path),
-                n_results=limit,
-            )
+            where_filter = None
+            if wing and room:
+                where_filter = {"$and": [{"wing": wing}, {"room": room}]}
+            elif wing:
+                where_filter = {"wing": wing}
+            elif room:
+                where_filter = {"room": room}
+
+            n_to_fetch = limit * 5 if (wing or room) else limit
+
+            try:
+                results = search_memories(
+                    query,
+                    palace_path=str(self._palace_path),
+                    n_results=n_to_fetch,
+                )
+                raw_results = (
+                    results.get("results", []) if isinstance(results, dict) else results
+                )
+            except Exception:
+                raw_results = []
+
             items = []
-            raw_results = (
-                results.get("results", []) if isinstance(results, dict) else results
-            )
             for r in raw_results:
                 r_wing = r.get("wing", "")
                 r_room = r.get("room", "")
@@ -1266,6 +1405,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         "room": r_room,
                     }
                 )
+                if len(items) >= limit:
+                    break
             return json.dumps({"results": items, "count": len(items)})
         except ImportError:
             return json.dumps({"error": "mempalace searcher not available"})
@@ -1342,9 +1483,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 if ttl_days > 0:
                     expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
 
+            parent_id = args.get("parent_id")
             metadata = {"wing": wing, "room": room, "closet": closet}
             if expires_at:
                 metadata["expires_at"] = expires_at
+            if parent_id:
+                metadata["parent_id"] = parent_id
 
             doc_id = str(uuid.uuid4())
             self._collection.add(
@@ -2120,6 +2264,302 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"result": "Pattern removed", "pattern": pattern})
 
         return json.dumps({"error": "Invalid mode"})
+
+    def _tool_expiring(self, args: dict) -> str:
+        """Preview drawers about to TTL-expire."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            days_ahead = args.get("days_ahead", 7)
+            wing = args.get("wing")
+            room = args.get("room")
+            rescue = args.get("rescue", False)
+            ttl_days = args.get("ttl_days", 90)
+
+            cutoff = (
+                datetime.now(timezone.utc) + timedelta(days=days_ahead)
+            ).isoformat()
+
+            where_filter = {"room": "sessions"}
+            if wing:
+                where_filter = {"$and": [{"wing": wing}, {"room": "sessions"}]}
+
+            where_base = {"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]}
+            results = self._collection.get(
+                where=where_base if not wing else where_filter,
+                include=["documents", "metadatas"],
+            )
+
+            expiring = []
+            docs = results.get("documents", []) or []
+            metas = results.get("metadatas", []) or []
+
+            for i, meta in enumerate(metas):
+                expires_at = meta.get("expires_at", "")
+                if not expires_at:
+                    continue
+                if expires_at > cutoff:
+                    continue
+                r_wing = meta.get("wing", "")
+                r_room = meta.get("room", "")
+                if wing and r_wing != wing:
+                    continue
+                if room and r_room != room:
+                    continue
+                expiring.append(
+                    {
+                        "document": docs[i] if i < len(docs) else "",
+                        "expires_at": expires_at,
+                        "wing": r_wing,
+                        "room": r_room,
+                        "closet": meta.get("closet", ""),
+                        "session_project": meta.get("session_project", ""),
+                    }
+                )
+
+            if rescue and expiring:
+                new_expiry = (
+                    datetime.now(timezone.utc) + timedelta(days=ttl_days)
+                ).isoformat()
+                ids_to_update = [
+                    meta.get("id", "")
+                    for meta in metas
+                    if meta.get("expires_at", "") in [e["expires_at"] for e in expiring]
+                ]
+                for doc_id in ids_to_update:
+                    if doc_id:
+                        self._collection.update(
+                            ids=[doc_id],
+                            metadatas=[{"expires_at": new_expiry}],
+                        )
+                return json.dumps(
+                    {
+                        "rescued": len(ids_to_update),
+                        "new_expires_at": new_expiry,
+                        "expiring": expiring,
+                    }
+                )
+
+            return json.dumps(
+                {"expiring": expiring, "count": len(expiring), "cutoff": cutoff}
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_backup(self, args: dict) -> str:
+        """Export palace drawers and KG to JSON."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            import uuid
+            from datetime import datetime
+            from pathlib import Path
+
+            backup_path = args.get("path")
+            include_kg = args.get("include_kg", True)
+
+            if not backup_path:
+                stamp = datetime.now().strftime("%Y%m%d")
+                backup_path = self._palace_path / "backups" / f"backup_{stamp}.json"
+            else:
+                backup_path = Path(backup_path).expanduser()
+
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+
+            all_data = self._collection.get(include=["documents", "metadatas"])
+            drawers = []
+            docs = all_data.get("documents", []) or []
+            metas = all_data.get("metadatas", []) or []
+            ids = all_data.get("ids", []) or []
+
+            for i, doc in enumerate(docs):
+                meta = metas[i] if i < len(metas) else {}
+                drawers.append(
+                    {
+                        "id": ids[i] if i < len(ids) else str(uuid.uuid4()),
+                        "document": doc,
+                        "metadata": meta,
+                    }
+                )
+
+            backup = {
+                "version": "1.0",
+                "created_at": datetime.now().isoformat(),
+                "drawers": drawers,
+                "kg_triples": [],
+            }
+
+            if include_kg and self._kg:
+                try:
+                    all_triples = self._kg.get_all_triples()
+                    backup["kg_triples"] = all_triples
+                except Exception as e:
+                    logger.debug("Failed to backup KG: %s", e)
+
+            with open(backup_path, "w") as f:
+                json.dump(backup, f, indent=2)
+
+            return json.dumps(
+                {
+                    "result": "Backup created",
+                    "path": str(backup_path),
+                    "drawers": len(drawers),
+                    "kg_triples": len(backup.get("kg_triples", [])),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_restore(self, args: dict) -> str:
+        """Restore palace from JSON backup."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            from pathlib import Path
+
+            backup_path = Path(args.get("path", "")).expanduser()
+            clear_first = args.get("clear_first", False)
+            include_kg = args.get("include_kg", True)
+
+            if not backup_path or not backup_path.exists():
+                return json.dumps({"error": f"Backup file not found: {backup_path}"})
+
+            with open(backup_path) as f:
+                backup = json.load(f)
+
+            drawers = backup.get("drawers", [])
+            kg_triples = backup.get("kg_triples", [])
+
+            if clear_first:
+                try:
+                    all_ids = [d["id"] for d in drawers]
+                    if all_ids:
+                        self._collection.delete(ids=all_ids)
+                except Exception as e:
+                    logger.debug("Failed to clear collection: %s", e)
+
+            added = 0
+            for d in drawers:
+                try:
+                    self._collection.add(
+                        documents=[d.get("document", "")],
+                        metadatas=[d.get("metadata", {})],
+                        ids=[d.get("id", str(uuid.uuid4()))],
+                    )
+                    added += 1
+                except Exception:
+                    pass
+
+            kg_restored = 0
+            if include_kg and kg_triples and self._kg:
+                try:
+                    for triple in kg_triples:
+                        self._kg.add_triple(
+                            triple.get("subject", ""),
+                            triple.get("predicate", ""),
+                            triple.get("object", ""),
+                            valid_from=triple.get("valid_from"),
+                        )
+                        kg_restored += 1
+                except Exception as e:
+                    logger.debug("Failed to restore KG: %s", e)
+
+            return json.dumps(
+                {
+                    "result": "Restored",
+                    "drawers_restored": added,
+                    "kg_triples_restored": kg_restored,
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_session_diff(self, args: dict) -> str:
+        """Show what changed between sessions."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            project = args.get("project", "")
+            before_date = args.get("before_date")
+            after_date = args.get("after_date")
+
+            now = datetime.now(timezone.utc)
+            if not after_date:
+                after_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+            if not before_date:
+                before_date = now.strftime("%Y-%m-%d")
+
+            if not project:
+                results = self._collection.get(
+                    where={"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]},
+                    include=["documents", "metadatas"],
+                )
+                metas = results.get("metadatas", []) or []
+                projects = set()
+                for m in metas:
+                    p = m.get("session_project", "")
+                    if p:
+                        projects.add(p)
+                if projects:
+                    project = sorted(projects)[-1]
+                else:
+                    return json.dumps({"message": "No projects found"})
+
+            where_filter = {
+                "$and": [
+                    {"wing": "wing_myos"},
+                    {"room": "sessions"},
+                    {"session_project": project},
+                ]
+            }
+
+            results = self._collection.get(
+                where=where_filter,
+                include=["documents", "metadatas"],
+            )
+
+            before_sessions = []
+            after_sessions = []
+            docs = results.get("documents", []) or []
+            metas = results.get("metadatas", []) or []
+
+            for i, meta in enumerate(metas):
+                session_date = meta.get("session_date", "")
+                if not session_date:
+                    continue
+                doc = docs[i] if i < len(docs) else ""
+                entry = {"date": session_date, "summary": doc, "project": project}
+
+                try:
+                    date_obj = datetime.fromisoformat(
+                        session_date.replace("Z", "+00:00")
+                    )
+                    if date_obj.strftime("%Y-%m-%d") <= after_date:
+                        after_sessions.append(entry)
+                    elif date_obj.strftime("%Y-%m-%d") <= before_date:
+                        before_sessions.append(entry)
+                except Exception:
+                    pass
+
+            new_entries = [s for s in after_sessions if s not in before_sessions]
+            old_entries = [s for s in before_sessions if s not in after_sessions]
+
+            return json.dumps(
+                {
+                    "project": project,
+                    "before_date": before_date,
+                    "after_date": after_date,
+                    "added": new_entries,
+                    "removed": old_entries,
+                    "count": len(new_entries) + len(old_entries),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         self._turn_count = turn_number
