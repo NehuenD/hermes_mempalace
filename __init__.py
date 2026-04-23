@@ -25,8 +25,9 @@ import json
 import logging
 import os
 import threading
+import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -845,6 +846,187 @@ SESSION_DIFF_SCHEMA = {
     },
 }
 
+RECALL_SCHEMA = {
+    "name": "mempalace_recall",
+    "description": (
+        "Access learnings with semantic similarity and filters. "
+        "The primary tool for retrieving stored knowledge. "
+        "Returns relevant learnings ranked by similarity."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Semantic query — matches against all learnings.",
+            },
+            "subject": {
+                "type": "string",
+                "description": "Filter by subject entity (e.g. 'Nehuen', 'T3Code').",
+            },
+            "closet": {
+                "type": "string",
+                "description": "Filter by closet: 'personal', 'projects', 'world'.",
+            },
+            "category": {
+                "type": "string",
+                "description": "Filter by category: 'fact', 'preference', 'decision', 'person', 'project'.",
+            },
+            "flag": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Filter by flags (e.g. ['CORE', 'EXPERIMENTAL']).",
+            },
+            "similarity": {
+                "type": "string",
+                "description": "Override query with explicit similarity string.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max results (default: 3, max: 10).",
+            },
+            "offset": {
+                "type": "integer",
+                "description": "Skip first N results (default: 0).",
+            },
+        },
+        "required": [],
+    },
+}
+
+RECALL_ALL_SCHEMA = {
+    "name": "mempalace_recall_all",
+    "description": (
+        "Fetch all learnings at once. Loads fresh context from MemPalace. "
+        "Called on first real interaction after session start."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "closet": {
+                "type": "string",
+                "description": "Filter by closet: 'personal', 'projects', 'world' (optional).",
+            },
+            "cap": {
+                "type": "integer",
+                "description": "Max learnings to return (default: 20, max: 100).",
+            },
+            "sort": {
+                "type": "string",
+                "enum": ["recent", "accessed", "relevance"],
+                "description": "Sort order: 'recent' (default), 'accessed' (last_accessed desc), 'relevance'.",
+            },
+        },
+        "required": [],
+    },
+}
+
+LEARN_SCHEMA = {
+    "name": "mempalace_learn",
+    "description": (
+        "File a new piece of knowledge. Automatically checks for existing similar facts before storing."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The knowledge to file. Verbatim original phrasing.",
+            },
+            "title": {
+                "type": "string",
+                "description": "Concise identifier summarizing the core fact.",
+            },
+            "description": {
+                "type": "string",
+                "description": "Brief one-sentence summary.",
+            },
+            "subject": {
+                "type": "string",
+                "description": "Subject entity (e.g. 'Nehuen', 'Collatz').",
+            },
+            "predicate": {
+                "type": "string",
+                "description": "Predicate/relationship (e.g. 'age', 'project', 'conjecture').",
+            },
+            "category": {
+                "type": "string",
+                "description": "Category: 'fact', 'preference', 'decision', 'person', 'project'.",
+            },
+            "closet": {
+                "type": "string",
+                "description": "Closet: 'personal', 'projects', 'world'.",
+            },
+            "auto_detect": {
+                "type": "boolean",
+                "description": "If true, check for existing similar facts before filing (default: True).",
+            },
+            "source_session": {
+                "type": "string",
+                "description": "Session this was learned in.",
+            },
+        },
+        "required": ["content"],
+    },
+}
+
+UPDATE_SCHEMA = {
+    "name": "mempalace_update",
+    "description": (
+        "Modify an existing learning entry. Additive/completing, not destructive."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "drawer_id": {
+                "type": "string",
+                "description": "ID of the drawer to update.",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["replace", "correct", "extend"],
+                "description": "'replace' (swap), 'correct' (fix wrong part), 'extend' (add context without removing).",
+            },
+            "content": {
+                "type": "string",
+                "description": "New content (for replace/correct modes).",
+            },
+            "extend_with": {
+                "type": "string",
+                "description": "Additional content to append (for extend mode).",
+            },
+            "title": {
+                "type": "string",
+                "description": "Updated title.",
+            },
+            "description": {
+                "type": "string",
+                "description": "Updated description.",
+            },
+        },
+        "required": ["drawer_id", "mode"],
+    },
+}
+
+DRAWER_HISTORY_SCHEMA = {
+    "name": "mempalace_drawer_history",
+    "description": ("Get all versions of a drawer by following parent_id chain."),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "drawer_id": {
+                "type": "string",
+                "description": "Current or historical drawer ID.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max versions (default: 20).",
+            },
+        },
+        "required": ["drawer_id"],
+    },
+}
+
 DIARY_WRITE_SCHEMA = {
     "name": "mempalace_diary_write",
     "description": (
@@ -930,6 +1112,12 @@ PROFILE_SWITCH_SCHEMA = {
     },
 }
 
+SWEEP_SCHEMA = {
+    "name": "mempalace_sweep",
+    "description": "Manually trigger expired drawer sweep. Runs TTL cleanup on all expired memories.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
+
 ALL_TOOL_SCHEMAS = [
     STATUS_SCHEMA,
     LIST_WINGS_SCHEMA,
@@ -962,6 +1150,7 @@ ALL_TOOL_SCHEMAS = [
     SUMMARIZE_SCHEMA,
     PROFILE_LIST_SCHEMA,
     PROFILE_SWITCH_SCHEMA,
+    SWEEP_SCHEMA,
     RECORD_MISTAKE_SCHEMA,
     SEARCH_MISTAKES_SCHEMA,
     RECALL_MISTAKES_SCHEMA,
@@ -970,6 +1159,11 @@ ALL_TOOL_SCHEMAS = [
     BACKUP_SCHEMA,
     RESTORE_SCHEMA,
     SESSION_DIFF_SCHEMA,
+    RECALL_SCHEMA,
+    RECALL_ALL_SCHEMA,
+    LEARN_SCHEMA,
+    UPDATE_SCHEMA,
+    DRAWER_HISTORY_SCHEMA,
 ]
 
 
@@ -1071,7 +1265,16 @@ class MempalaceMemoryProvider(MemoryProvider):
             logger.info("MemPalace initialized at %s", self._palace_path)
 
             self._load_wake_up_context()
-            self._build_taxonomy_cache()
+            cache_path = self._palace_path / "taxonomy_cache.json"
+            if cache_path.exists():
+                try:
+                    with open(cache_path) as f:
+                        self._taxonomy_cache = json.load(f)
+                    logger.debug("Taxonomy cache loaded from disk")
+                except Exception:
+                    self._build_taxonomy_cache()
+            else:
+                self._build_taxonomy_cache()
             self._sweep_expired_drawers()
             self._seed_kg_if_empty()
         except Exception as e:
@@ -1085,17 +1288,27 @@ class MempalaceMemoryProvider(MemoryProvider):
         try:
             from mempalace.layers import Layer0, Layer1
 
-            palace_str = str(self._palace_path)
+            palace_str = str(self._palace_path / "palace")
 
             l0 = Layer0(identity_path=str(self._palace_path / "identity.txt"))
             self._l0_identity = l0.render()
+
+            # Check sync between identity.txt and SOUL.md
+            hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+            soul_path = Path(hermes_home) / "SOUL.md"
+            identity_path = self._palace_path / "identity.txt"
+            if soul_path.exists() and identity_path.exists():
+                soul_mtime = soul_path.stat().st_mtime
+                id_mtime = identity_path.stat().st_mtime
+                if abs(soul_mtime - id_mtime) > 86400:
+                    logger.info("identity.txt and SOUL.md timestamps differ > 1 day")
 
             l1 = Layer1(palace_path=palace_str, wing=self._default_wing)
             self._l1_story = l1.generate()
 
             self._wake_up_context = f"{self._l0_identity}\n\n{self._l1_story}"
         except Exception as e:
-            logger.debug("Failed to load wake-up context: %s", e)
+            logger.warning("Failed to load wake-up context: %s", e)
             self._l0_identity = "## L0 — IDENTITY\nMemPalace memory active."
             self._l1_story = "## L1 — ESSENTIAL STORY\nNo palace data yet."
             self._wake_up_context = f"{self._l0_identity}\n\n{self._l1_story}"
@@ -1149,6 +1362,7 @@ class MempalaceMemoryProvider(MemoryProvider):
     def _build_taxonomy_cache(self) -> None:
         if not self._collection:
             return
+        cache_path = self._palace_path / "taxonomy_cache.json"
         try:
             all_data = self._collection.get(include=["metadatas"])
             taxonomy: Dict[str, Dict[str, int]] = {}
@@ -1159,6 +1373,11 @@ class MempalaceMemoryProvider(MemoryProvider):
                     taxonomy[w] = {}
                 taxonomy[w][r] = taxonomy[w].get(r, 0) + 1
             self._taxonomy_cache = taxonomy
+            try:
+                with open(cache_path, "w") as f:
+                    json.dump(taxonomy, f)
+            except Exception:
+                pass
             logger.debug("Taxonomy cache built: %d wings", len(taxonomy))
         except Exception as e:
             logger.debug("Failed to build taxonomy cache: %s", e)
@@ -1173,6 +1392,12 @@ class MempalaceMemoryProvider(MemoryProvider):
             del self._taxonomy_cache[wing][room]
         if not self._taxonomy_cache[wing]:
             del self._taxonomy_cache[wing]
+        try:
+            cache_path = self._palace_path / "taxonomy_cache.json"
+            with open(cache_path, "w") as f:
+                json.dump(self._taxonomy_cache, f)
+        except Exception:
+            pass
 
     def _sweep_expired_drawers(self) -> None:
         if not self._collection:
@@ -1226,6 +1451,30 @@ class MempalaceMemoryProvider(MemoryProvider):
                         count += 1
                     except Exception:
                         pass
+
+            # Seed from identity.txt
+            identity_path = self._palace_path / "identity.txt"
+            if identity_path.exists():
+                try:
+                    content = identity_path.read_text()
+                    lines = content.strip().split("\n")
+                    in_section = None
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("## "):
+                            in_section = line.strip("# ").lower()
+                        elif line.startswith("- ") and in_section:
+                            fact = line[2:].strip()
+                            if fact and len(fact) > 3:
+                                self._kg.add_triple(
+                                    "MyOS",
+                                    in_section.replace(" ", "_"),
+                                    fact[:100],
+                                    valid_from=now,
+                                )
+                                count += 1
+                except Exception:
+                    pass
 
             # Seed from entity_registry.json
             if registry_path.exists():
@@ -1490,6 +1739,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_profile_list()
             elif tool_name == "mempalace_profile_switch":
                 return self._tool_profile_switch(args)
+            elif tool_name == "mempalace_sweep":
+                return self._tool_sweep(args)
             elif tool_name == "mempalace_record_mistake":
                 return self._tool_record_mistake(args)
             elif tool_name == "mempalace_search_mistakes":
@@ -1506,6 +1757,16 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_restore(args)
             elif tool_name == "mempalace_session_diff":
                 return self._tool_session_diff(args)
+            elif tool_name == "mempalace_recall":
+                return self._tool_recall(args)
+            elif tool_name == "mempalace_recall_all":
+                return self._tool_recall_all(args)
+            elif tool_name == "mempalace_learn":
+                return self._tool_learn(args)
+            elif tool_name == "mempalace_update":
+                return self._tool_update(args)
+            elif tool_name == "mempalace_drawer_history":
+                return self._tool_drawer_history(args)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1691,11 +1952,15 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         try:
             content = args.get("content", "")
             wing = args.get("wing", self._default_wing)
+            if wing:
+                where_filter = {"$and": [{"wing": wing}]}
+            else:
+                where_filter = None
             results = self._collection.get(
-                where={"wing": wing} if wing else None, include=["documents"]
+                where=where_filter, include=["documents"], limit=100
             )
             for doc in results.get("documents", []):
-                if content.lower() in doc.lower():
+                if doc and content.lower() in doc.lower():
                     return json.dumps({"duplicate": True, "matched": doc[:200]})
             return json.dumps({"duplicate": False})
         except Exception as e:
@@ -2728,11 +2993,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_profile_switch(self, args: dict) -> str:
         """Switch to a different profile."""
-        try:
-            name = args.get("name", "")
-            if not name:
-                return json.dumps({"error": "Profile name required"})
+        name = args.get("name", "")
+        if not name:
+            return json.dumps({"error": "Profile name required"})
 
+        try:
             hermes_home = Path.home() / ".hermes"
             config_path = hermes_home / "config.yaml"
 
@@ -2749,7 +3014,14 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 profiles[name] = f"~/.mempalace_{name}/"
 
             profile_path = Path(os.path.expanduser(profiles[name]))
-            if not profile_path.exists():
+            if profile_path.exists():
+                test_col_path = profile_path / "palace" / "chroma.sqlite"
+                if not test_col_path.exists():
+                    return json.dumps(
+                        {"error": f"Invalid profile: {name} is not a valid MemPalace"}
+                    )
+
+            elif not profile_path.exists():
                 profile_path.mkdir(parents=True, exist_ok=True)
                 (profile_path / "palace").mkdir(parents=True, exist_ok=True)
 
@@ -2776,6 +3048,16 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     "palace_path": str(self._palace_path),
                 }
             )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_sweep(self, args: dict) -> str:
+        """Manually trigger expired drawer sweep."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            self._sweep_expired_drawers()
+            return json.dumps({"result": "sweep_completed"})
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -3196,9 +3478,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             if not before_date:
                 before_date = now.strftime("%Y-%m-%d")
 
-            where_filter = {"wing": "wing_myos", "room": "sessions"}
+            conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
             if project:
-                where_filter["session_project"] = project
+                conditions.append({"session_project": project})
+            where_filter = (
+                {"$and": conditions} if len(conditions) > 1 else conditions[0]
+            )
 
             results = self._collection.get(
                 where=where_filter,
@@ -3246,6 +3531,401 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     "added": new_entries,
                     "removed": old_entries,
                     "count": len(new_entries) + len(old_entries),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_recall(self, args: dict) -> str:
+        """Access learnings with semantic similarity and filters."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            from datetime import datetime, timezone
+            from mempalace.searcher import search_memories
+
+            query = args.get("query", "") or args.get("similarity", "")
+            subject = args.get("subject", "")
+            closet = args.get("closet", "")
+            category = args.get("category", "")
+            flag = args.get("flag", [])
+            limit = args.get("limit", 3)
+            offset = args.get("offset", 0)
+
+            limit = min(max(1, limit), 10)
+            n_to_fetch = (offset + limit) * 5
+
+            try:
+                results = search_memories(
+                    query,
+                    palace_path=str(self._palace_path),
+                    n_results=n_to_fetch,
+                    closet=closet,
+                    category=category,
+                    client=self._chroma_client,
+                )
+                raw_results = (
+                    results.get("results", []) if isinstance(results, dict) else results
+                )
+            except Exception:
+                raw_results = []
+
+            items = []
+            for r in raw_results:
+                r_closet = r.get("closet", "")
+                r_category = r.get("category", "")
+                r_subject = r.get("subject", "")
+                r_flags = r.get("flags", [])
+
+                if closet and r_closet != closet:
+                    continue
+                if category and r_category != category:
+                    continue
+                if subject and r_subject != subject:
+                    continue
+                if flag:
+                    if isinstance(flag, list):
+                        if not any(f in r_flags for f in flag):
+                            continue
+                    elif flag not in r_flags:
+                        continue
+
+                items.append(
+                    {
+                        "id": r.get("id", ""),
+                        "content": r.get("text", r.get("content", "")),
+                        "subject": r_subject,
+                        "closet": r_closet,
+                        "category": r_category,
+                        "flags": r_flags,
+                        "created_at": r.get("created_at", ""),
+                        "similarity_score": r.get("similarity", r.get("distance", 0)),
+                    }
+                )
+
+            total = len(items)
+            paginated = items[offset : offset + limit]
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for item in paginated:
+                self._collection.update(
+                    ids=[item["id"]],
+                    metadatas=[{"last_accessed": now_iso}],
+                )
+
+            return json.dumps(
+                {
+                    "results": paginated,
+                    "count": len(paginated),
+                    "total": total,
+                    "offset": offset,
+                    "limit": limit,
+                }
+            )
+        except ImportError:
+            return json.dumps({"error": "mempalace searcher not available"})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_recall_all(self, args: dict) -> str:
+        """Fetch all learnings at once."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            from datetime import datetime, timezone
+
+            closet = args.get("closet", "")
+            cap = min(args.get("cap", 20), 100)
+            sort = args.get("sort", "recent")
+
+            where_filter = {"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]}
+            if closet:
+                where_filter["$and"].append({"closet": closet})
+
+            results = self._collection.get(
+                where=where_filter,
+                include=["documents", "metadatas", "ids"],
+            )
+
+            docs = results.get("documents", []) or []
+            metas = results.get("metadatas", []) or []
+            ids = results.get("ids", []) or []
+
+            items = []
+            for i, meta in enumerate(metas):
+                items.append(
+                    {
+                        "id": ids[i] if i < len(ids) else "",
+                        "content": docs[i] if i < len(docs) else "",
+                        "subject": meta.get("subject", ""),
+                        "closet": meta.get("closet", ""),
+                        "category": meta.get("category", ""),
+                        "flags": meta.get("flags", []),
+                        "created_at": meta.get("created_at", ""),
+                        "last_accessed": meta.get("last_accessed", ""),
+                    }
+                )
+
+            if sort == "accessed":
+                items.sort(key=lambda x: x.get("last_accessed", "") or "", reverse=True)
+            elif sort == "relevance":
+                pass
+            else:
+                items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+            capped = items[:cap]
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for item in capped:
+                self._collection.update(
+                    ids=[item["id"]],
+                    metadatas=[{"last_accessed": now_iso}],
+                )
+
+            return json.dumps(
+                {
+                    "learnings": capped,
+                    "count": len(capped),
+                    "total": len(items),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_learn(self, args: dict) -> str:
+        """File new knowledge with auto-detection."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            auto_detect = args.get("auto_detect", True)
+            content = args.get("content", "")
+            title = args.get("title", "")
+            description = args.get("description", "")
+            subject = args.get("subject", "")
+            predicate = args.get("predicate", "")
+            category = args.get("category", "fact")
+            closet = args.get("closet", "personal")
+            source_session = args.get("source_session", "")
+
+            if auto_detect and content:
+                meta_filter = {"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]}
+                try:
+                    existing = self._collection.get(
+                        where=meta_filter, include=["documents", "metadatas", "ids"]
+                    )
+                except Exception:
+                    existing = {"documents": [], "metadatas": [], "ids": []}
+
+                docs = existing.get("documents", [])
+                metas = existing.get("metadatas", [])
+                ids = existing.get("ids", [])
+                match_threshold = 0.85
+
+                candidates = []
+                for i, doc in enumerate(docs):
+                    if content.strip() == doc.strip():
+                        meta = metas[i] if i < len(metas) else {}
+                        candidates.append(
+                            {
+                                "id": ids[i] if i < len(ids) else "",
+                                "content": doc,
+                                "closet": meta.get("closet", ""),
+                                "category": meta.get("category", ""),
+                            }
+                        )
+
+                if candidates:
+                    return json.dumps(
+                        {
+                            "match_found": True,
+                            "candidates": candidates,
+                            "action": "update|correct|extend|skip",
+                            "message": "Similar learnings found. Review candidates before updating.",
+                        }
+                    )
+
+            metadata = {
+                "wing": "wing_myos",
+                "room": "learnings",
+                "closet": closet,
+                "category": category,
+                "subject": subject,
+                "predicate": predicate,
+                "title": title,
+                "source_session": source_session,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            drawer_id = str(uuid.uuid4())
+            self._collection.add(
+                ids=[drawer_id],
+                documents=[content],
+                metadatas=[metadata],
+            )
+
+            return json.dumps(
+                {
+                    "drawer_id": drawer_id,
+                    "title": title,
+                    "subject": subject,
+                    "closet": closet,
+                    "category": category,
+                    "stored": True,
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_update(self, args: dict) -> str:
+        """Modify existing learning entry."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            from datetime import datetime, timezone
+
+            drawer_id = args.get("drawer_id", "")
+            mode = args.get("mode", "replace")
+            content = args.get("content", "")
+            extend_with = args.get("extend_with", "")
+            title = args.get("title", "")
+            description = args.get("description", "")
+
+            if not drawer_id:
+                return json.dumps({"error": "drawer_id required"})
+
+            existing = self._collection.get(
+                ids=[drawer_id],
+                include=["documents", "metadatas"],
+            )
+            docs = existing.get("documents", [])
+            metas = existing.get("metadatas", [])
+
+            if not docs:
+                return json.dumps({"error": "Drawer not found"})
+
+            old_content = docs[0]
+            old_meta = metas[0] if metas else {}
+
+            predicate = old_meta.get("predicate", "value")
+            subject = old_meta.get("subject", "?")
+
+            new_content = content
+            if mode == "extend":
+                new_content = old_content + "\n---\n" + extend_with
+
+            if mode in ("replace", "correct"):
+                flags = old_meta.get("flags", [])
+                if "correction" not in flags:
+                    flags.append("correction")
+
+                self._tool_kg_add(
+                    {
+                        "subject": subject,
+                        "predicate": f"had_{predicate}",
+                        "object": old_content[:200],
+                    }
+                )
+
+                new_meta = dict(old_meta)
+                new_meta["parent_id"] = drawer_id
+                new_meta["flags"] = flags
+                new_meta["corrected_to"] = ""
+                new_meta["last_accessed"] = ""
+                new_meta["created_at"] = datetime.now(timezone.utc).isoformat()
+            else:
+                new_meta = dict(old_meta)
+
+            if title:
+                new_meta["title"] = title
+            if description:
+                new_meta["description"] = description
+
+            new_drawer_id = str(uuid.uuid4())
+            self._collection.add(
+                ids=[new_drawer_id],
+                documents=[new_content],
+                metadatas=[new_meta],
+            )
+
+            if mode in ("replace", "correct") and new_meta.get("parent_id"):
+                self._collection.update(
+                    ids=[drawer_id],
+                    metadatas=[{"corrected_to": new_drawer_id}],
+                )
+
+            return json.dumps(
+                {
+                    "new_drawer_id": new_drawer_id,
+                    "parent_id": drawer_id,
+                    "mode": mode,
+                    "kg_triple_added": mode in ("replace", "correct"),
+                }
+            )
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _tool_drawer_history(self, args: dict) -> str:
+        """Get all versions of a drawer by following parent_id chain."""
+        if not self._collection:
+            return json.dumps({"error": "Palace not initialized"})
+        try:
+            drawer_id = args.get("drawer_id", "")
+            limit = args.get("limit", 20)
+
+            if not drawer_id:
+                return json.dumps({"error": "drawer_id required"})
+
+            versions = []
+            current_id = drawer_id
+            version_num = 1
+
+            while current_id and version_num <= limit:
+                result = self._collection.get(
+                    ids=[current_id],
+                    include=["documents", "metadatas"],
+                )
+                docs = result.get("documents", [])
+                metas = result.get("metadatas", [])
+
+                if not docs:
+                    break
+
+                versions.append(
+                    {
+                        "id": current_id,
+                        "content": docs[0],
+                        "metadata": metas[0] if metas else {},
+                        "version_num": version_num,
+                    }
+                )
+
+                parent_id = metas[0].get("parent_id", "") if metas else ""
+                current_id = parent_id
+                version_num += 1
+
+            if drawer_id not in [v["id"] for v in versions]:
+                result = self._collection.get(
+                    ids=[drawer_id],
+                    include=["documents", "metadatas"],
+                )
+                docs = result.get("documents", [])
+                metas = result.get("metadatas", [])
+                if docs:
+                    versions.append(
+                        {
+                            "id": drawer_id,
+                            "content": docs[0],
+                            "metadata": metas[0] if metas else {},
+                            "version_num": version_num,
+                        }
+                    )
+
+            versions.sort(key=lambda x: x.get("version_num", 0), reverse=True)
+
+            return json.dumps(
+                {
+                    "drawer_id": drawer_id,
+                    "versions": versions[:limit],
+                    "count": len(versions),
                 }
             )
         except Exception as e:
