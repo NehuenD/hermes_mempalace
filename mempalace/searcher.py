@@ -110,17 +110,25 @@ def search_memories(
         return {"error": f"No palace found at {palace_path}: {e}"}
 
     # Build where filter - support closet/category pre-filtering
+    def _filter(v):
+        return v and v not in ("", "all")
+
     conditions = []
-    if wing:
+    if _filter(wing):
         conditions.append({"wing": wing})
-    if room:
+    if _filter(room):
         conditions.append({"room": room})
-    if closet:
+    if _filter(closet):
         conditions.append({"closet": closet})
-    if category:
+    if _filter(category):
         conditions.append({"category": category})
 
-    where = {"$and": conditions} if conditions else {}
+    if len(conditions) == 0:
+        where = {}
+    elif len(conditions) == 1:
+        where = conditions[0]
+    else:
+        where = {"$and": conditions}
 
     try:
         kwargs = {
@@ -140,6 +148,8 @@ def search_memories(
     dists = results["distances"][0]
 
     hits = []
+    import json as json_module
+
     for doc, meta, dist in zip(docs, metas, dists):
         hits.append(
             {
@@ -148,6 +158,8 @@ def search_memories(
                 "room": meta.get("room", "unknown"),
                 "closet": meta.get("closet", ""),
                 "category": meta.get("category", ""),
+                "subject": meta.get("subject", ""),
+                "flags": json_module.loads(meta.get("flags", "[]")),
                 "source_file": Path(meta.get("source_file", "?")).name,
                 "similarity": round(1 - dist, 3),
             }

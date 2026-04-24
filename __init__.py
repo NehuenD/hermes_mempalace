@@ -1354,6 +1354,29 @@ class MempalaceMemoryProvider(MemoryProvider):
             self._collection = self._chroma_client.get_or_create_collection(
                 self._collection_name
             )
+
+            try:
+                existing = self._collection.get(
+                    where={"wing": "wing_myos", "room": "learnings"},
+                    include=["metadatas"],
+                )
+                if not existing.get("ids"):
+                    import time
+
+                    self._collection.add(
+                        documents=["[learnings room bootstrap]"],
+                        metadatas=[
+                            {
+                                "wing": "wing_myos",
+                                "room": "learnings",
+                                "closet": "system",
+                            }
+                        ],
+                        ids=[f"bootstrap_learnings_{int(time.time())}"],
+                    )
+            except Exception:
+                pass
+
             return True
         except Exception as e:
             logger.debug("Palace not available: %s", e)
@@ -1952,10 +1975,18 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         try:
             content = args.get("content", "")
             wing = args.get("wing", self._default_wing)
-            if wing:
-                where_filter = {"$and": [{"wing": wing}]}
+
+            conditions = []
+            if wing and wing not in ("", "all"):
+                conditions.append({"wing": wing})
+
+            if len(conditions) == 0:
+                where_filter = {}
+            elif len(conditions) == 1:
+                where_filter = conditions[0]
             else:
-                where_filter = None
+                where_filter = {"$and": conditions}
+
             results = self._collection.get(
                 where=where_filter, include=["documents"], limit=100
             )
@@ -2004,6 +2035,18 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             wing = args.get("wing", self._default_wing)
             room = args.get("room", "general")
             closet = args.get("closet", "hall_general")
+            subject = args.get("subject", "")
+            flags = args.get("flags", [])
+
+            content = content.strip() if content else ""
+            if not content or len(content) < 3:
+                return json.dumps(
+                    {
+                        "result": "skipped",
+                        "reason": "content_too_short",
+                        "drawer_id": None,
+                    }
+                )
 
             if self._is_noise(content):
                 return json.dumps(
@@ -2021,7 +2064,15 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     expires_at = (datetime.now() + timedelta(days=ttl_days)).isoformat()
 
             parent_id = args.get("parent_id")
-            metadata = {"wing": wing, "room": room, "closet": closet}
+            metadata = {
+                "wing": wing,
+                "room": room,
+                "closet": closet,
+                "subject": subject or "",
+                "flags": json.dumps(flags or []),
+                "created_at": datetime.now().isoformat(),
+                "last_accessed": datetime.now().isoformat(),
+            }
             if expires_at:
                 metadata["expires_at"] = expires_at
             if parent_id:
@@ -2551,6 +2602,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             (r"^(.+) knows (.+)$", "knows"),
             (r"^(.+) was born in (.+)$", "born_in"),
             (r"^(.+) is from (.+)$", "is_from"),
+            (r"^(.+) uses (.+)$", "uses"),
+            (r"^(.+) built (.+)$", "built"),
+            (r"^(.+) depends on (.+)$", "depends_on"),
+            (r"^(.+) is located in (.+)$", "located_in"),
         ]
 
         for pattern, predicate in patterns:
@@ -3466,71 +3521,76 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
-            from datetime import datetime, timedelta, timezone
-
             project = args.get("project", "")
-            before_date = args.get("before_date")
-            after_date = args.get("after_date")
-
-            now = datetime.now(timezone.utc)
-            if not after_date:
-                after_date = (now - timedelta(days=7)).strftime("%Y-%m-%d")
-            if not before_date:
-                before_date = now.strftime("%Y-%m-%d")
 
             conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
             if project:
                 conditions.append({"session_project": project})
-            where_filter = (
-                {"$and": conditions} if len(conditions) > 1 else conditions[0]
+
+            if len(conditions) == 0:
+                where_filter = {}
+            elif len(conditions) == 1:
+                where_filter = conditions[0]
+            else:
+                where_filter = {"$and": conditions}
+
+            forget_filter = args.get("forget_filter", True)
+            new_filter = args.get("new_filter", True)
+
+            forget_conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
+            if forget_filter and project:
+                forget_conditions.append({"session_project": project})
+            forget_where = (
+                {"$and": forget_conditions}
+                if len(forget_conditions) > 1
+                else forget_conditions[0]
             )
 
-            results = self._collection.get(
-                where=where_filter,
-                include=["documents", "metadatas"],
+            new_conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
+            if new_filter and project:
+                new_conditions.append({"session_project": project})
+            new_where = (
+                {"$and": new_conditions}
+                if len(new_conditions) > 1
+                else new_conditions[0]
             )
 
-            before_sessions = []
-            after_sessions = []
-            docs = results.get("documents", []) or []
-            metas = results.get("metadatas", []) or []
+            forget_results = self._collection.get(
+                where=forget_where, include=["metadatas"]
+            )
+            new_results = self._collection.get(where=new_where, include=["metadatas"])
 
-            for i, meta in enumerate(metas):
-                s_project = meta.get("session_project", "")
-                if project and s_project != project:
-                    continue
+            forget_projects = {
+                m.get("session_project")
+                for m in forget_results.get("metadatas", [])
+                if m.get("session_project")
+            }
+            new_projects = {
+                m.get("session_project")
+                for m in new_results.get("metadatas", [])
+                if m.get("session_project")
+            }
 
-                session_date = meta.get("session_date", "")
-                if not session_date:
-                    continue
-                doc = docs[i] if i < len(docs) else ""
+            added_projects = new_projects - forget_projects
+            removed_projects = forget_projects - new_projects
 
-                try:
-                    date_obj = datetime.fromisoformat(
-                        session_date.replace("Z", "+00:00")
-                    )
-                    date_str = date_obj.strftime("%Y-%m-%d")
-                except Exception:
-                    date_str = session_date[:10] if session_date else ""
-
-                entry = {"date": date_str, "summary": doc, "project": s_project}
-
-                if date_str <= after_date:
-                    after_sessions.append(entry)
-                elif date_str <= before_date:
-                    before_sessions.append(entry)
-
-            new_entries = [s for s in after_sessions if s not in before_sessions]
-            old_entries = [s for s in before_sessions if s not in after_sessions]
+            added = [
+                m
+                for m in new_results.get("metadatas", [])
+                if m.get("session_project") in added_projects
+            ]
+            removed = [
+                m
+                for m in forget_results.get("metadatas", [])
+                if m.get("session_project") in removed_projects
+            ]
 
             return json.dumps(
                 {
                     "project": project,
-                    "before_date": before_date,
-                    "after_date": after_date,
-                    "added": new_entries,
-                    "removed": old_entries,
-                    "count": len(new_entries) + len(old_entries),
+                    "added": added,
+                    "removed": removed,
+                    "count": len(added) + len(removed),
                 }
             )
         except Exception as e:
