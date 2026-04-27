@@ -1357,7 +1357,7 @@ class MempalaceMemoryProvider(MemoryProvider):
 
             try:
                 existing = self._collection.get(
-                    where={"wing": "wing_myos", "room": "learnings"},
+                    where={"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]},
                     include=["metadatas"],
                 )
                 if not existing.get("ids"):
@@ -3622,6 +3622,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     n_results=n_to_fetch,
                     closet=closet,
                     category=category,
+                    subject=subject,
                     client=self._chroma_client,
                 )
                 raw_results = (

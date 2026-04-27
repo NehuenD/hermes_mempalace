@@ -93,6 +93,7 @@ def search_memories(
     room: str = None,
     closet: str = None,
     category: str = None,
+    subject: str = None,
     n_results: int = 5,
     client: "chromadb.PersistentClient" = None,
 ) -> dict:
@@ -122,6 +123,8 @@ def search_memories(
         conditions.append({"closet": closet})
     if _filter(category):
         conditions.append({"category": category})
+    if _filter(subject):
+        conditions.append({"subject": subject})
 
     if len(conditions) == 0:
         where = {}
