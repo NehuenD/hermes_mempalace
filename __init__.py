@@ -3328,7 +3328,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             results = self._collection.get(
                 where=where_filter if where_filter else None,
-                include=["documents", "metadatas", "ids"],
+                include=["documents", "metadatas"],
             )
 
             expiring = []
@@ -3522,17 +3522,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": "Palace not initialized"})
         try:
             project = args.get("project", "")
-
-            conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
-            if project:
-                conditions.append({"session_project": project})
-
-            if len(conditions) == 0:
-                where_filter = {}
-            elif len(conditions) == 1:
-                where_filter = conditions[0]
-            else:
-                where_filter = {"$and": conditions}
+            before_date = args.get("before_date", "")
+            after_date = args.get("after_date", "")
 
             forget_filter = args.get("forget_filter", True)
             new_filter = args.get("new_filter", True)
@@ -3540,6 +3531,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             forget_conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
             if forget_filter and project:
                 forget_conditions.append({"session_project": project})
+            if forget_filter and before_date:
+                forget_conditions.append({"session_date": {"$lte": before_date}})
+            if forget_filter and after_date:
+                forget_conditions.append({"session_date": {"$gte": after_date}})
             forget_where = (
                 {"$and": forget_conditions}
                 if len(forget_conditions) > 1
@@ -3549,6 +3544,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             new_conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
             if new_filter and project:
                 new_conditions.append({"session_project": project})
+            if new_filter and before_date:
+                new_conditions.append({"session_date": {"$lte": before_date}})
+            if new_filter and after_date:
+                new_conditions.append({"session_date": {"$gte": after_date}})
             new_where = (
                 {"$and": new_conditions}
                 if len(new_conditions) > 1
@@ -3705,18 +3704,16 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             results = self._collection.get(
                 where=where_filter,
-                include=["documents", "metadatas", "ids"],
+                include=["documents", "metadatas"],
             )
 
             docs = results.get("documents", []) or []
             metas = results.get("metadatas", []) or []
-            ids = results.get("ids", []) or []
 
             items = []
             for i, meta in enumerate(metas):
                 items.append(
                     {
-                        "id": ids[i] if i < len(ids) else "",
                         "content": docs[i] if i < len(docs) else "",
                         "subject": meta.get("subject", ""),
                         "closet": meta.get("closet", ""),
@@ -3771,15 +3768,13 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 meta_filter = {"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]}
                 try:
                     existing = self._collection.get(
-                        where=meta_filter, include=["documents", "metadatas", "ids"]
+                        where=meta_filter, include=["documents", "metadatas"]
                     )
                 except Exception:
                     existing = {"documents": [], "metadatas": [], "ids": []}
 
                 docs = existing.get("documents", [])
                 metas = existing.get("metadatas", [])
-                ids = existing.get("ids", [])
-                match_threshold = 0.85
 
                 candidates = []
                 for i, doc in enumerate(docs):
@@ -3787,7 +3782,6 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         meta = metas[i] if i < len(metas) else {}
                         candidates.append(
                             {
-                                "id": ids[i] if i < len(ids) else "",
                                 "content": doc,
                                 "closet": meta.get("closet", ""),
                                 "category": meta.get("category", ""),
