@@ -1357,10 +1357,33 @@ class MempalaceMemoryProvider(MemoryProvider):
 
             try:
                 existing = self._collection.get(
-                    where={"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]},
+                    where={"$and": [{"wing": "wing_myos"}, {"room": "diary"}]},
                     include=["metadatas"],
                 )
                 if not existing.get("ids"):
+                    import time
+
+                    self._collection.add(
+                        documents=["[diary room bootstrap]"],
+                        metadatas=[
+                            {
+                                "wing": "wing_myos",
+                                "room": "diary",
+                                "closet": "system",
+                            }
+                        ],
+                        ids=[f"bootstrap_diary_{int(time.time())}"],
+                    )
+            except Exception:
+                pass
+
+            # Bootstrap learnings room in wing_myos if not exists
+            try:
+                existing_learnings = self._collection.get(
+                    where={"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]},
+                    include=["metadatas"],
+                )
+                if not existing_learnings.get("ids"):
                     import time
 
                     self._collection.add(
@@ -1587,7 +1610,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
                 results = search_memories(
                     query,
-                    palace_path=str(self._palace_path),
+                    palace_path=str(self._palace_path / "palace"),
                     n_results=5,
                 )
                 if results:
@@ -1927,7 +1950,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             try:
                 results = search_memories(
                     query,
-                    palace_path=str(self._palace_path),
+                    palace_path=str(self._palace_path / "palace"),
                     n_results=n_to_fetch,
                 )
                 raw_results = (
@@ -2755,7 +2778,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 n_to_fetch = limit * 5
                 results = search_memories(
                     query,
-                    palace_path=str(self._palace_path),
+                    palace_path=str(self._palace_path / "palace"),
                     n_results=n_to_fetch,
                 )
                 raw_results = (
@@ -3559,6 +3582,28 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             )
             new_results = self._collection.get(where=new_where, include=["metadatas"])
 
+            if not before_date and not after_date:
+                all_metas = forget_results.get("metadatas", []) + new_results.get(
+                    "metadatas", []
+                )
+                dated = [
+                    (m.get("session_date", ""), m)
+                    for m in all_metas
+                    if m.get("session_date")
+                ]
+                dated.sort(key=lambda x: x[0])
+                half = len(dated) // 2
+                older_dates = {d for d, m in dated[:half]} if half > 0 else set()
+                newer_dates = {d for d, m in dated[half:]} if half > 0 else set()
+                forget_metas = [
+                    m for m in all_metas if m.get("session_date") in older_dates
+                ]
+                new_metas = [
+                    m for m in all_metas if m.get("session_date") in newer_dates
+                ]
+                forget_results = {"metadatas": forget_metas}
+                new_results = {"metadatas": new_metas}
+
             forget_projects = {
                 m.get("session_project")
                 for m in forget_results.get("metadatas", [])
@@ -3617,12 +3662,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             try:
                 results = search_memories(
                     query,
-                    palace_path=str(self._palace_path),
+                    palace_path=str(self._palace_path / "palace"),
                     n_results=n_to_fetch,
                     closet=closet,
                     category=category,
                     subject=subject,
-                    client=self._chroma_client,
                 )
                 raw_results = (
                     results.get("results", []) if isinstance(results, dict) else results
@@ -3698,14 +3742,16 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             cap = min(args.get("cap", 20), 100)
             sort = args.get("sort", "recent")
 
-            where_filter = {"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]}
+            # Optional closet filter
             if closet:
-                where_filter["$and"].append({"closet": closet})
-
-            results = self._collection.get(
-                where=where_filter,
-                include=["documents", "metadatas"],
-            )
+                results = self._collection.get(
+                    where={"closet": closet},
+                    include=["documents", "metadatas"],
+                )
+            else:
+                results = self._collection.get(
+                    include=["documents", "metadatas"],
+                )
 
             docs = results.get("documents", []) or []
             metas = results.get("metadatas", []) or []
@@ -3754,7 +3800,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
-            auto_detect = args.get("auto_detect", True)
+            auto_detect = args.get("auto_detect", False)
             content = args.get("content", "")
             title = args.get("title", "")
             description = args.get("description", "")
@@ -3765,26 +3811,41 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             source_session = args.get("source_session", "")
 
             if auto_detect and content:
-                meta_filter = {"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]}
+                # IMPROVE-3: recall-before-filing — do broad semantic search first
+                from mempalace.searcher import search_memories
+
+                SIMILARITY_THRESHOLD = 0.85
+
                 try:
-                    existing = self._collection.get(
-                        where=meta_filter, include=["documents", "metadatas"]
+                    recall_results = search_memories(
+                        content,
+                        palace_path=str(self._palace_path / "palace"),
+                        n_results=10,
+                        closet=closet or "",
+                        category=category or "",
+                        subject=subject or "",
+                    )
+                    raw_results = (
+                        recall_results.get("results", [])
+                        if isinstance(recall_results, dict)
+                        else recall_results
                     )
                 except Exception:
-                    existing = {"documents": [], "metadatas": [], "ids": []}
-
-                docs = existing.get("documents", [])
-                metas = existing.get("metadatas", [])
+                    raw_results = []
 
                 candidates = []
-                for i, doc in enumerate(docs):
-                    if content.strip() == doc.strip():
-                        meta = metas[i] if i < len(metas) else {}
+                for r in raw_results:
+                    sim = r.get("similarity", r.get("distance", 0))
+                    if sim > SIMILARITY_THRESHOLD:
                         candidates.append(
                             {
-                                "content": doc,
-                                "closet": meta.get("closet", ""),
-                                "category": meta.get("category", ""),
+                                "id": r.get("id", ""),
+                                "content": r.get("text", r.get("content", "")),
+                                "subject": r.get("subject", ""),
+                                "closet": r.get("closet", ""),
+                                "category": r.get("category", ""),
+                                "flags": r.get("flags", []),
+                                "similarity_score": sim,
                             }
                         )
 
@@ -3794,13 +3855,13 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                             "match_found": True,
                             "candidates": candidates,
                             "action": "update|correct|extend|skip",
-                            "message": "Similar learnings found. Review candidates before updating.",
+                            "message": f"Similar learnings found (best sim={candidates[0]['similarity_score']:.2f}). Review candidates before updating.",
                         }
                     )
 
             metadata = {
                 "wing": "wing_myos",
-                "room": "learnings",
+                "room": "diary",
                 "closet": closet,
                 "category": category,
                 "subject": subject,
