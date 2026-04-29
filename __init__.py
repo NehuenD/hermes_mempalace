@@ -3742,10 +3742,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             cap = min(args.get("cap", 20), 100)
             sort = args.get("sort", "recent")
 
-            # Optional closet filter
+            # Optional closet filter — use ChromaDB $eq syntax
             if closet:
                 results = self._collection.get(
-                    where={"closet": closet},
+                    where={"closet": {"$eq": closet}},
                     include=["documents", "metadatas"],
                 )
             else:
@@ -3755,11 +3755,13 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             docs = results.get("documents", []) or []
             metas = results.get("metadatas", []) or []
+            ids = results.get("ids", []) or []
 
             items = []
             for i, meta in enumerate(metas):
                 items.append(
                     {
+                        "id": ids[i] if i < len(ids) else "",
                         "content": docs[i] if i < len(docs) else "",
                         "subject": meta.get("subject", ""),
                         "closet": meta.get("closet", ""),
@@ -3861,7 +3863,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             metadata = {
                 "wing": "wing_myos",
-                "room": "diary",
+                "room": "learnings",
                 "closet": closet,
                 "category": category,
                 "subject": subject,
@@ -4018,22 +4020,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 current_id = parent_id
                 version_num += 1
 
-            if drawer_id not in [v["id"] for v in versions]:
-                result = self._collection.get(
-                    ids=[drawer_id],
-                    include=["documents", "metadatas"],
-                )
-                docs = result.get("documents", [])
-                metas = result.get("metadatas", [])
-                if docs:
-                    versions.append(
-                        {
-                            "id": drawer_id,
-                            "content": docs[0],
-                            "metadata": metas[0] if metas else {},
-                            "version_num": version_num,
-                        }
-                    )
+            if not versions:
+                return json.dumps({"error": "Drawer not found"})
 
             versions.sort(key=lambda x: x.get("version_num", 0), reverse=True)
 
