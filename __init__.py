@@ -1204,7 +1204,11 @@ class MempalaceMemoryProvider(MemoryProvider):
         if self._available:
             return True
         try:
-            import mempalace
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.config import MempalaceConfig
 
             return True
@@ -1252,6 +1256,11 @@ class MempalaceMemoryProvider(MemoryProvider):
 
         try:
             import chromadb
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.knowledge_graph import KnowledgeGraph
 
             self._chroma_client = chromadb.PersistentClient(
@@ -1286,6 +1295,11 @@ class MempalaceMemoryProvider(MemoryProvider):
             return
 
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.layers import Layer0, Layer1
 
             palace_str = str(self._palace_path / "palace")
@@ -1606,7 +1620,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             if not self._ensure_palace():
                 return
             try:
-                from mempalace.searcher import search_memories
+                import sys
+
+                _plugin_dir = Path(__file__).parent / "mempalace"
+                if str(_plugin_dir) not in sys.path:
+                    sys.path.insert(0, str(_plugin_dir))
+                from searcher import search_memories
 
                 results = search_memories(
                     query,
@@ -1929,7 +1948,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         if not self._collection:
             return json.dumps({"error": "Palace not initialized"})
         try:
-            from mempalace.searcher import search_memories
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
+            from searcher import search_memories
 
             query = args.get("query", "")
             wing = args.get("wing")
@@ -2022,6 +2046,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_get_aaak_spec(self) -> str:
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.dialect import Dialect
 
             return json.dumps(
@@ -2220,6 +2249,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
         try:
             import uuid
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.general_extractor import extract_memories
 
             content = args.get("content", "")
@@ -2773,7 +2807,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 watch_id = str(uuid.uuid4())
 
             try:
-                from mempalace.searcher import search_memories
+                import sys
+
+                _plugin_dir = Path(__file__).parent / "mempalace"
+                if str(_plugin_dir) not in sys.path:
+                    sys.path.insert(0, str(_plugin_dir))
+                from searcher import search_memories
 
                 n_to_fetch = limit * 5
                 results = search_memories(
@@ -2842,6 +2881,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_traverse(self, args: dict) -> str:
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.palace_graph import traverse
 
             start_room = args.get("start_room", "")
@@ -2855,6 +2899,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_find_tunnels(self, args: dict) -> str:
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.palace_graph import find_tunnels
 
             wing_a = args.get("wing_a", "")
@@ -2868,6 +2917,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_graph_stats(self) -> str:
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.palace_graph import graph_stats
 
             stats = graph_stats(col=self._collection)
@@ -2879,6 +2933,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_diary_write(self, args: dict) -> str:
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.mcp_server import tool_diary_write
 
             agent = args.get("agent", "")
@@ -2892,6 +2951,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_diary_read(self, args: dict) -> str:
         try:
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
             from mempalace.mcp_server import tool_diary_read
 
             agent = args.get("agent", "")
@@ -3646,7 +3710,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": "Palace not initialized"})
         try:
             from datetime import datetime, timezone
-            from mempalace.searcher import search_memories
+            import sys
+
+            _plugin_dir = Path(__file__).parent / "mempalace"
+            if str(_plugin_dir) not in sys.path:
+                sys.path.insert(0, str(_plugin_dir))
+            from searcher import search_memories
 
             query = args.get("query", "") or args.get("similarity", "")
             subject = args.get("subject", "")
@@ -3679,7 +3748,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 r_closet = r.get("closet", "")
                 r_category = r.get("category", "")
                 r_subject = r.get("subject", "")
-                r_flags = r.get("flags", [])
+                r_flags = (
+                    json.loads(r.get("flags", "[]"))
+                    if isinstance(r.get("flags", []), str)
+                    and r.get("flags", "").startswith("[")
+                    else r.get("flags", [])
+                )
 
                 if closet and r_closet != closet:
                     continue
@@ -3712,10 +3786,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             now_iso = datetime.now(timezone.utc).isoformat()
             for item in paginated:
-                self._collection.update(
-                    ids=[item["id"]],
-                    metadatas=[{"last_accessed": now_iso}],
-                )
+                item_id = item.get("id", "")
+                if item_id:
+                    self._collection.update(
+                        ids=[item_id],
+                        metadatas=[{"last_accessed": now_iso}],
+                    )
 
             return json.dumps(
                 {
@@ -3766,7 +3842,10 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         "subject": meta.get("subject", ""),
                         "closet": meta.get("closet", ""),
                         "category": meta.get("category", ""),
-                        "flags": meta.get("flags", []),
+                        "flags": json.loads(meta.get("flags", "[]"))
+                        if isinstance(meta.get("flags", []), str)
+                        and meta.get("flags", "").startswith("[")
+                        else meta.get("flags", []),
                         "created_at": meta.get("created_at", ""),
                         "last_accessed": meta.get("last_accessed", ""),
                     }
@@ -3782,10 +3861,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             capped = items[:cap]
             now_iso = datetime.now(timezone.utc).isoformat()
             for item in capped:
-                self._collection.update(
-                    ids=[item["id"]],
-                    metadatas=[{"last_accessed": now_iso}],
-                )
+                item_id = item.get("id", "")
+                if item_id:
+                    self._collection.update(
+                        ids=[item_id],
+                        metadatas=[{"last_accessed": now_iso}],
+                    )
 
             return json.dumps(
                 {
@@ -3814,7 +3895,12 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             if auto_detect and content:
                 # IMPROVE-3: recall-before-filing — do broad semantic search first
-                from mempalace.searcher import search_memories
+                import sys
+
+                _plugin_dir = Path(__file__).parent / "mempalace"
+                if str(_plugin_dir) not in sys.path:
+                    sys.path.insert(0, str(_plugin_dir))
+                from searcher import search_memories
 
                 SIMILARITY_THRESHOLD = 0.85
 

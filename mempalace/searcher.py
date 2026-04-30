@@ -149,13 +149,15 @@ def search_memories(
     docs = results["documents"][0]
     metas = results["metadatas"][0]
     dists = results["distances"][0]
+    ids = results["ids"][0]
 
     hits = []
     import json as json_module
 
-    for doc, meta, dist in zip(docs, metas, dists):
+    for id, doc, meta, dist in zip(ids, docs, metas, dists):
         hits.append(
             {
+                "id": id,
                 "text": doc,
                 "wing": meta.get("wing", "unknown"),
                 "room": meta.get("room", "unknown"),
