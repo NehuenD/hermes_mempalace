@@ -163,16 +163,16 @@ When you finish a working session, file what happened:
 
 ```
 mempalace_session_write(
-    project="collatz:arithmetic-progressions",
-    summary="Derived new bound for T(3^k) stopping times. Found pattern in residue classes mod 9.",
-    next="Verify bound holds for k=7,8. Check for edge cases in 3x+1 path.",
+    project="recipe-api:rest-v2",
+    summary="Migrated ingredients endpoint to GraphQL. Resolved N+1 query on /recipes/:id. Added cursor pagination.",
+    next="Update /search endpoint. Write migration docs. Deploy to staging."
 )
 ```
 
 Next session, restore context:
 
 ```
-mempalace_session_read(project="collatz", last_n=5)
+mempalace_session_read(project="recipe-api", last_n=5)
 ```
 
 The system prompt auto-injects the 5 most recent sessions at startup — no manual tracking needed.
@@ -210,9 +210,8 @@ ENTITY → codes|topic|"key_quote"|flags
 ```
 NEHUEN → workout,daily|pref_exercise|streak:7days|DECISION
 AUTH_DB → Postgres|db,migration|reason:reliable|DECISION
-T3CODE → NextJS15,Tailwind|stack|typescript+appdir|FACT
-AADAM_JOBS → music,collection|ajc00319|paused_item261|PROJECT
-COLLATZ → math,conjecture|T3k_bound|pattern_mod9|TECHNICAL,PIVOT
+MYSQL → MySQL8,production|db,legacy|reason:maturity|PROJECT
+RECIPE_APP → recipe,api|stack|Node+Postgres|FACT
 ```
 
 ### When to Use AAAK
@@ -271,18 +270,18 @@ mempalace_remember(content="Nehuen prefers dark mode in all terminals", category
 # → filed in wing_myos / learnings / personal
 ```
 
-### Research Session Tracking
+### Project Session Tracking
 
 ```
 # End of session:
 mempalace_session_write(
-    project="Collatz:T3k-progressions",
-    summary="Proved T(3^k) < 2.5*k*log10(3). Verification pending for k=7,8.",
-    next="Verify k=7,8. Write up findings. Check against Lagarias dataset."
+    project="recipe-api:rest-v2",
+    summary="Migrated ingredients endpoint to GraphQL. Resolved N+1 query on /recipes/:id. Added cursor pagination.",
+    next="Update /search endpoint. Write migration docs. Deploy to staging."
 )
 
 # Next session — start fresh:
-mempalace_session_read(project="Collatz", last_n=3)
+mempalace_session_read(project="recipe-api", last_n=3)
 # → system_prompt_block auto-injects 5 recent sessions at startup
 ```
 
