@@ -371,7 +371,7 @@ hermes mempalace mine ~/projects/myapp
 
 ---
 
-## Tools (45 total)
+## Tools (43 total)
 
 ### Read
 - `mempalace_status` — Palace overview + drawer count
@@ -413,10 +413,29 @@ hermes mempalace mine ~/projects/myapp
 - `mempalace_graph_stats` — Connectivity stats
 
 ### Mistakes
-- `mempalace_record_mistake` — Record a mistake (domain, severity, error_type)
-- `mempalace_recall_mistakes` — Recall all mistakes for a domain
-- `mempalace_search_mistakes` — Search mistakes semantically
-- `mempalace_distill_mistake` — Distill a recorded mistake into a structured lesson
+
+MemPalace tracks mistakes to prevent repeating them. Record, recall, and distill mistakes into learnings:
+
+```
+# Record a mistake
+mempalace_record_mistake(
+    content="ChromaDB compound filter with two top-level operators crashes — must use $and",
+    domain="hermes",
+    error_type="runtime",
+    severity="HIGH",
+)
+
+# Recall mistakes via semantic search (category="mistake")
+mempalace_recall(query="ChromaDB filter bugs", category="mistake")
+
+# Distill a mistake into an actionable lesson (files in wing_mistakes + optional closet)
+mempalace_distill_mistake(
+    drawer_id="...",       # the mistake drawer to distill
+    closet="projects",     # optionally file the lesson in projects/personal too
+)
+```
+
+Distill runs a structured analysis — root cause, counterfactual, actionable lesson, related concepts, and improvement score. The lesson is stored with a `parent_id` link back to the original mistake, so you can trace the full history.
 
 ### Utilities
 - `mempalace_summarize` — Palace summary

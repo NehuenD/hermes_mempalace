@@ -580,83 +580,11 @@ GRAPH_STATS_SCHEMA = {
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
-RECALL_MISTAKES_SCHEMA = {
-    "name": "mempalace_recall_mistakes",
-    "description": (
-        "Recall past mistakes by domain to prevent repeating errors. "
-        "Returns all recorded mistakes for a domain with severity."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "domain": {
-                "type": "string",
-                "description": "Domain tag to recall (e.g., 'android', 'minecraft', 'skill').",
-            },
-        },
-        "required": ["domain"],
-    },
-}
-
-SEARCH_MISTAKES_SCHEMA = {
-    "name": "mempalace_search_mistakes",
-    "description": (
-        "Search mistakes registry for relevant past errors. "
-        "Use before tackling tasks to avoid repeating mistakes."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query.",
-            },
-            "limit": {
-                "type": "integer",
-                "description": "Max results (default: 5).",
-            },
-        },
-        "required": ["query"],
-    },
-}
-
-DISTILL_MISTAKE_SCHEMA = {
-    "name": "mempalace_distill_mistake",
-    "description": (
-        "Distill a recorded mistake into structured, retrievable learnings. "
-        "Runs a structured analysis — root cause, counterfactual, actionable lesson, "
-        "related concepts, and improvement score. Stores the distilled lesson as a new "
-        "drawer with parent_id linking to the original mistake. Returns the full "
-        "structured result so you can also file the lesson to personal/projects closets "
-        "via mempalace_learn. Use after any mistake to extract lasting wisdom from it."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "drawer_id": {
-                "type": "string",
-                "description": "The drawer ID of the mistake to distill.",
-            },
-            "closet": {
-                "type": "string",
-                "enum": ["personal", "projects", "world"],
-                "description": (
-                    "Optional closet to file the distilled lesson into additionally. "
-                    "'projects' for technical/coding mistakes. "
-                    "'personal' for habits or character. "
-                    "Default: none — only stored in wing_mistakes."
-                ),
-            },
-        },
-        "required": ["drawer_id"],
-    },
-}
-
 RECORD_MISTAKE_SCHEMA = {
     "name": "mempalace_record_mistake",
     "description": (
-        "Record a mistake or error to the mistakes registry. "
-        "Use after any significant error to build institutional memory."
+        "DEPRECATED: Use mempalace_learn with category=\"mistake\" instead. "
+        "This tool is kept for backward compatibility."
     ),
     "parameters": {
         "type": "object",
@@ -902,7 +830,7 @@ RECALL_SCHEMA = {
             },
             "category": {
                 "type": "string",
-                "description": "Filter by category: 'fact', 'preference', 'decision', 'person', 'project'.",
+                "description": "Filter by category: 'fact', 'preference', 'decision', 'person', 'project', 'mistake'.",
             },
             "flag": {
                 "type": "array",
@@ -948,6 +876,10 @@ RECALL_ALL_SCHEMA = {
                 "enum": ["recent", "accessed", "relevance"],
                 "description": "Sort order: 'recent' (default), 'accessed' (last_accessed desc), 'relevance'.",
             },
+            "category": {
+                "type": "string",
+                "description": "Filter by category: 'fact', 'preference', 'decision', 'person', 'project', 'mistake'.",
+            },
         },
         "required": [],
     },
@@ -983,7 +915,7 @@ LEARN_SCHEMA = {
             },
             "category": {
                 "type": "string",
-                "description": "Category: 'fact', 'preference', 'decision', 'person', 'project'.",
+                "description": "Category: 'fact', 'preference', 'decision', 'person', 'project', 'mistake'.",
             },
             "closet": {
                 "type": "string",
@@ -997,6 +929,27 @@ LEARN_SCHEMA = {
                 "type": "string",
                 "description": "Session this was learned in.",
             },
+            "domain": {
+                "type": "string",
+                "description": "Domain area for mistakes (e.g., 'general', 'android', 'ios', 'web'). Required when category='mistake'.",
+            },
+            "severity": {
+                "type": "string",
+                "enum": ["HIGH", "MED", "LOW"],
+                "description": "Error severity. Required when category='mistake'.",
+            },
+            "error_type": {
+                "type": "string",
+                "enum": [
+                    "runtime",
+                    "build",
+                    "logic",
+                    "network",
+                    "workflow",
+                    "security",
+                ],
+                "description": "Type of error. Optional, defaults to 'runtime' when category='mistake'.",
+            },
         },
         "required": ["content"],
     },
@@ -1005,7 +958,9 @@ LEARN_SCHEMA = {
 UPDATE_SCHEMA = {
     "name": "mempalace_update",
     "description": (
-        "Modify an existing learning entry. Additive/completing, not destructive."
+        "Modify an existing learning entry. Additive/completing, not destructive. "
+        "mode=distill: run LLM analysis to extract root_cause, lesson, counterfactual, "
+        "related_concepts, improvement_score from any drawer. Works on any content."
     ),
     "parameters": {
         "type": "object",
@@ -1016,8 +971,8 @@ UPDATE_SCHEMA = {
             },
             "mode": {
                 "type": "string",
-                "enum": ["replace", "correct", "extend"],
-                "description": "'replace' (swap), 'correct' (fix wrong part), 'extend' (add context without removing).",
+                "enum": ["replace", "correct", "extend", "distill"],
+                "description": "'replace' (swap), 'correct' (fix wrong part), 'extend' (add context without removing), 'distill' (LLM analysis to extract structured lessons).",
             },
             "content": {
                 "type": "string",
@@ -1034,6 +989,15 @@ UPDATE_SCHEMA = {
             "description": {
                 "type": "string",
                 "description": "Updated description.",
+            },
+            "closet": {
+                "type": "string",
+                "enum": ["personal", "projects", "world", ""],
+                "description": (
+                    "Optional closet for cross-filing when mode=distill. "
+                    "'projects' for technical lessons, 'personal' for habits. "
+                    "Default: none — only stored in wing_mistakes for mistakes."
+                ),
             },
         },
         "required": ["drawer_id", "mode"],
@@ -1184,8 +1148,6 @@ ALL_TOOL_SCHEMAS = [
     PROFILE_SWITCH_SCHEMA,
     SWEEP_SCHEMA,
     RECORD_MISTAKE_SCHEMA,
-    SEARCH_MISTAKES_SCHEMA,
-    RECALL_MISTAKES_SCHEMA,
     DISTILL_MISTAKE_SCHEMA,
     NOISE_FILTER_SCHEMA,
     EXPIRING_SCHEMA,
@@ -1385,6 +1347,85 @@ class MempalaceMemoryProvider(MemoryProvider):
             return block + "\n"
         except Exception as e:
             logger.debug("Failed to get recent sessions: %s", e)
+            return ""
+
+    def _get_learnings_block(self) -> str:
+        """Get recent learnings for wake-up context.
+
+        Note: hall_events entries are excluded because they are short-lived
+        session bookkeeping with 1-week TTL, not actual learnings.
+        """
+        if not self._ensure_palace():
+            return ""
+        try:
+            results = self._collection.get(
+                where={"$and": [{"closet": {"$eq": "learnings"}}]},
+                include=["documents", "metadatas"],
+            )
+
+            docs = results.get("documents", []) or []
+            metas = results.get("metadatas", []) or []
+            ids = results.get("ids", []) or []
+
+            items = []
+            for i, meta in enumerate(metas):
+                # Filter out hall_events entries in Python (ChromaDB $ne is unreliable for exclusions)
+                if meta.get("room") == "hall_events":
+                    continue
+                items.append(
+                    {
+                        "id": ids[i] if i < len(ids) else "",
+                        "content": docs[i] if i < len(docs) else "",
+                        "subject": meta.get("subject", ""),
+                        "category": meta.get("category", ""),
+                        "flags": meta.get("flags", []),
+                        "created_at": meta.get("created_at", ""),
+                    }
+                )
+
+            items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+            capped = items[:30]
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for item in capped:
+                item_id = item.get("id", "")
+                if item_id:
+                    self._collection.update(
+                        ids=[item_id],
+                        metadatas=[{"last_accessed": now_iso}],
+                    )
+
+            if not capped:
+                return ""
+
+            block = "## What I Know (MemPalace Learnings)\n"
+            for item in capped:
+                content = item.get("content", "")
+                subject = item.get("subject", "")
+                category = item.get("category", "general")
+                flags = item.get("flags", [])
+
+                if not subject and content:
+                    parts = content.strip().split()
+                    subject = parts[0].upper() if parts else "UNKNOWN"
+                elif not subject:
+                    subject = "UNKNOWN"
+
+                predicate = (
+                    content.strip().replace("\n", " ")[:60] if content else category
+                )
+
+                flag_str = ",".join(flags[:3]) if isinstance(flags, list) else ""
+
+                block += (
+                    f"- {subject} → {predicate}|{category}"
+                    + (f"|{flag_str}" if flag_str else "")
+                    + "\n"
+                )
+
+            return block + "\n"
+        except Exception as e:
+            logger.debug("Failed to get learnings block: %s", e)
             return ""
 
     def _ensure_palace(self) -> bool:
@@ -1595,7 +1636,14 @@ class MempalaceMemoryProvider(MemoryProvider):
             logger.debug("Failed to seed KG: %s", e)
 
     def system_prompt_block(self) -> str:
-        sessions_block = self._get_recent_sessions_block()
+        try:
+            sessions_block = self._get_recent_sessions_block()
+        except Exception:
+            sessions_block = ""
+        try:
+            learnings_block = self._get_learnings_block()
+        except Exception:
+            learnings_block = ""
 
         aaak_guide = """## AAAK Compression Dialect
 AAAK (Autonomous Autonomous Autonomous Knowledge) is a 30x lossless shorthand format.
@@ -1622,6 +1670,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 "Use mempalace_diary_write in AAAK format for agent observations.\n"
                 "Use mempalace_session_write at session end to track multi-session projects.\n"
                 "Use mempalace_session_read at session start to restore project context.\n\n"
+                + learnings_block
                 + sessions_block
                 + aaak_guide
             )
@@ -1634,6 +1683,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             "Use mempalace_diary_write in AAAK shorthand for observations.\n"
             "Use mempalace_session_write at session end to track multi-session projects.\n"
             "Use mempalace_session_read at session start to restore project context.\n\n"
+            + learnings_block
             + sessions_block
             + aaak_guide
         )
@@ -1841,10 +1891,6 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_sweep(args)
             elif tool_name == "mempalace_record_mistake":
                 return self._tool_record_mistake(args)
-            elif tool_name == "mempalace_search_mistakes":
-                return self._tool_search_mistakes(args)
-            elif tool_name == "mempalace_recall_mistakes":
-                return self._tool_recall_mistakes(args)
             elif tool_name == "mempalace_distill_mistake":
                 return self._tool_distill_mistake(args)
             elif tool_name == "mempalace_noise_filter":
@@ -1874,7 +1920,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_status(self) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             count = self._collection.count()
@@ -1890,7 +1936,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_list_wings(self, args: dict = None) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             args = args or {}
@@ -1919,7 +1965,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_list_rooms(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             wing = args.get("wing", "")
@@ -1951,7 +1997,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_get_taxonomy(self, args: dict = None) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             args = args or {}
@@ -1980,7 +2026,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_search(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             import sys
@@ -2052,7 +2098,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_check_duplicate(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             content = args.get("content", "")
@@ -2112,7 +2158,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         return False
 
     def _tool_add_drawer(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             import uuid
@@ -2431,7 +2477,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_delete_drawer(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             drawer_id = args.get("drawer_id", "")
@@ -2442,7 +2488,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_get_versions(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             drawer_id = args.get("drawer_id", "")
@@ -2770,7 +2816,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         return "\n".join(chunks)
 
     def _tool_set_drawer_flags(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             drawer_id = args.get("drawer_id", "")
@@ -2818,7 +2864,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_watch(self, args: dict) -> str:
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             import hashlib
@@ -3004,7 +3050,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_summarize(self, args: dict) -> str:
         """Summarize the palace - wings, rooms, counts, oldest/newest."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
 
         try:
@@ -3230,7 +3276,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_sweep(self, args: dict) -> str:
         """Manually trigger expired drawer sweep."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             self._sweep_expired_drawers()
@@ -3239,313 +3285,29 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
 
     def _tool_record_mistake(self, args: dict) -> str:
-        if not self._collection:
-            return json.dumps({"error": "Palace not initialized"})
-        try:
-            import uuid
-            from datetime import datetime, timedelta
-
-            content = args.get("content", "")
-            domain = args.get("domain", "general")
-            severity = args.get("severity", "MED")
-            error_type = args.get("error_type", "runtime")
-
-            room = f"room_{domain}"
-            closet = "hall_errors"
-
-            entity_code = f"{domain.upper()[:4]}_{len(content)}"
-            formatted = f"{entity_code} → {domain}|mistake|{content}|error_type:{error_type},severity:{severity}"
-
-            metadata = {
-                "wing": "wing_mistakes",
-                "room": room,
-                "closet": closet,
-                "domain": domain,
-                "severity": severity,
-                "error_type": error_type,
-            }
-
-            doc_id = str(uuid.uuid4())
-            self._collection.add(
-                documents=[formatted],
-                metadatas=[metadata],
-                ids=[doc_id],
-            )
-            self._update_taxonomy_cache("wing_mistakes", room, 1)
-
-            if self._kg:
-                self._kg.add_triple(
-                    entity_code,
-                    "mistake",
-                    content,
-                    valid_from=datetime.now().isoformat(),
-                )
-
-            return json.dumps(
-                {
-                    "result": "Mistake recorded",
-                    "mistake_id": doc_id,
-                    "domain": domain,
-                    "severity": severity,
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    def _tool_search_mistakes(self, args: dict) -> str:
-        if not self._collection:
-            return json.dumps({"error": "Palace not initialized"})
-        try:
-            query = args.get("query", "")
-            limit = args.get("limit", 5)
-
-            results = self._collection.get(
-                where={"wing": "wing_mistakes"},
-                include=["metadatas", "documents"],
-            )
-            items = []
-            for i, doc in enumerate(results.get("documents", []) or []):
-                meta = results.get("metadatas", [])[i]
-                doc_lower = doc.lower()
-                query_lower = query.lower()
-                if query_lower and query_lower not in doc_lower:
-                    continue
-                items.append(
-                    {
-                        "text": doc,
-                        "domain": meta.get("domain"),
-                        "severity": meta.get("severity"),
-                        "error_type": meta.get("error_type"),
-                    }
-                )
-                if len(items) >= limit:
-                    break
-
-            return json.dumps({"results": items, "count": len(items)})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    def _tool_recall_mistakes(self, args: dict) -> str:
-        if not self._collection:
-            return json.dumps({"error": "Palace not initialized"})
-        try:
-            domain = args.get("domain", "")
-            if not domain:
-                return json.dumps({"error": "Domain required"})
-
-            room = f"room_{domain}"
-            results = self._collection.get(
-                where={"wing": "wing_mistakes", "room": room},
-                include=["metadatas", "documents"],
-            )
-            items = []
-            for i, doc in enumerate(results.get("documents", []) or []):
-                meta = results.get("metadatas", [])[i]
-                items.append(
-                    {
-                        "text": doc,
-                        "severity": meta.get("severity"),
-                        "error_type": meta.get("error_type"),
-                    }
-                )
-
-            return json.dumps(
-                {"domain": domain, "mistakes": items, "count": len(items)}
-            )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        """DEPRECATED: Use mempalace_learn with category="mistake" instead."""
+        content = args.get("content", "")
+        domain = args.get("domain", "general")
+        severity = args.get("severity", "MED")
+        error_type = args.get("error_type", "runtime")
+        title = f"[MISTAKE] {domain}: {content[:50]}"
+        return self._tool_learn({
+            "content": content,
+            "category": "mistake",
+            "domain": domain,
+            "severity": severity,
+            "error_type": error_type,
+            "title": title,
+        })
 
     def _tool_distill_mistake(self, args: dict) -> str:
-        """Run structured analysis on a mistake to extract lasting lessons."""
-        import json as _json
-        import uuid as _uuid
-        from datetime import datetime
-
-        if not self._collection:
-            return _json.dumps({"error": "Palace not initialized"})
-        try:
-            drawer_id = args.get("drawer_id", "")
-            extra_closet = args.get("closet", "")
-
-            # 1. Fetch the original mistake drawer
-            results = self._collection.get(
-                ids=[drawer_id],
-                include=["metadatas", "documents"],
-            )
-            documents = results.get("documents", [])
-            if not documents or documents == [None]:
-                return _json.dumps({"error": f"No drawer found with id: {drawer_id}"})
-
-            doc = documents[0]
-            meta = (results.get("metadatas") or [{}])[0]
-            domain = meta.get("domain", "general")
-            severity = meta.get("severity", "MED")
-            error_type = meta.get("error_type", "runtime")
-
-            # 2. Run structured LLM analysis
-            analysis_prompt = (
-                "You are a rigorous post-mortem analyst. Given a recorded mistake, "
-                "produce a deep structural analysis. Return ONLY valid JSON with these exact keys:\n"
-                "{\n"
-                '  "root_cause": "...",\n'
-                '  "lesson": "...",\n'
-                '  "counterfactual": "...",\n'
-                '  "related_concepts": ["...", "..."],\n'
-                '  "improvement_score": N\n'
-                "}\n\n"
-                "Rules:\n"
-                "- root_cause: the fundamental reason this failed (not just what happened)\n"
-                "- lesson: the actionable takeaway — what you should do differently\n"
-                "- counterfactual: what would have happened if you had applied the lesson\n"
-                "- related_concepts: 2-4 relevant topic tags (e.g. 'filter-syntax', 'chromadb', 'error-handling')\n"
-                "- improvement_score: 1-5, how actionable/transferable is this lesson\n"
-                "- Return ONLY the JSON. No markdown fences. No explanation.\n\n"
-                f"MISTAKE: {doc}\n"
-                f"DOMAIN: {domain}\n"
-                f"ERROR TYPE: {error_type}\n"
-                f"SEVERITY: {severity}\n"
-            )
-
-            from hermes_tools import terminal
-
-            analysis_result = terminal(
-                command=(
-                    f"python3 -c \"\n"
-                    f"import json, sys\n"
-                    f"from anthropic import Anthropic\n"
-                    f"client = Anthropic()\n"
-                    f"msg = client.messages.create(\n"
-                    f"    model='claude-opus-4-7-20251120',\n"
-                    f"    max_tokens=1024,\n"
-                    f"    messages=[{{'role': 'user', 'content': {repr(analysis_prompt)}}}]\n"
-                    f")\n"
-                    f"print(msg.content[0].text)\n"
-                    f"\""
-                ),
-                timeout=30,
-            )
-
-            raw = analysis_result.get("output", "").strip()
-
-            # Try to extract JSON from the response
-            json_str = raw
-            if "```json" in raw:
-                json_str = raw.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw:
-                json_str = raw.split("```")[1].split("```")[0].strip()
-            # Remove any leading non-JSON (e.g. "Here is the analysis:" prefix)
-            first_brace = json_str.find("{")
-            if first_brace > 0:
-                json_str = json_str[first_brace:]
-
-            analysis = {}
-            try:
-                analysis = _json.loads(json_str)
-            except Exception:
-                return _json.dumps({
-                    "error": "Failed to parse LLM analysis response",
-                    "raw": raw[:500],
-                    "hint": "The LLM may have returned non-JSON. Check the raw field or retry."
-                })
-
-            root_cause = analysis.get("root_cause", "unknown")
-            lesson = analysis.get("lesson", "unknown")
-            counterfactual = analysis.get("counterfactual", "unknown")
-            related_concepts = analysis.get("related_concepts", [])
-            improvement_score = int(analysis.get("improvement_score", 3))
-
-            # 3. Format and store distilled lesson in wing_mistakes
-            lesson_id = str(_uuid.uuid4())
-            lessons_doc = (
-                f"LESSON → {domain.upper()[:4]}_{drawer_id[:8]}|mistake-distill|"
-                f"root:{root_cause}|lesson:{lesson}|counterfactual:{counterfactual}|"
-                f"concepts:{','.join(related_concepts)}|score:{improvement_score}/5"
-            )
-            lesson_meta = {
-                "wing": "wing_mistakes",
-                "room": f"room_{domain}",
-                "closet": "hall_lessons",
-                "parent_id": drawer_id,
-                "domain": domain,
-                "severity": severity,
-                "error_type": error_type,
-                "root_cause": root_cause,
-                "lesson": lesson,
-                "counterfactual": counterfactual,
-                "improvement_score": improvement_score,
-                "distilled": True,
-                "related_concepts": related_concepts,
-            }
-
-            self._collection.add(
-                documents=[lessons_doc],
-                metadatas=[lesson_meta],
-                ids=[lesson_id],
-            )
-            self._update_taxonomy_cache("wing_mistakes", f"room_{domain}", 1)
-
-            # 4. Optionally file to wing_general for cross-domain recall
-            extra_drawer_id = None
-            if extra_closet in ("personal", "projects"):
-                extra_drawer_id = str(_uuid.uuid4())
-                extra_doc = (
-                    f"LESSON → {domain.upper()[:4]}|lesson|{lesson}|"
-                    f"root_cause:{root_cause}|from_mistake:{drawer_id[:8]}"
-                )
-                extra_meta = {
-                    "wing": "wing_general",
-                    "room": "learnings",
-                    "closet": extra_closet,
-                    "parent_id": drawer_id,
-                    "lesson_id": lesson_id,
-                    "domain": domain,
-                    "subject": domain,
-                    "improvement_score": improvement_score,
-                    "distilled_from": "distill_mistake",
-                }
-                self._collection.add(
-                    documents=[extra_doc],
-                    metadatas=[extra_meta],
-                    ids=[extra_drawer_id],
-                )
-                self._update_taxonomy_cache("wing_general", "learnings", 1)
-
-            # 5. Update KG if available
-            if self._kg:
-                self._kg.add_triple(
-                    f"MISTAKE_{drawer_id[:8]}",
-                    "distilled_to_lesson",
-                    lesson,
-                    valid_from=datetime.now().isoformat(),
-                )
-                self._kg.add_triple(
-                    lesson_id[:8],
-                    "root_cause",
-                    root_cause,
-                    valid_from=datetime.now().isoformat(),
-                )
-
-            return _json.dumps({
-                "drawer_id": lesson_id,
-                "parent_id": drawer_id,
-                "root_cause": root_cause,
-                "lesson": lesson,
-                "counterfactual": counterfactual,
-                "related_concepts": related_concepts,
-                "improvement_score": improvement_score,
-                "filed_to": {
-                    "wing": "wing_mistakes",
-                    "room": f"room_{domain}",
-                    "closet": "hall_lessons",
-                },
-                "also_filed_to": (
-                    {"wing": "wing_general", "room": "learnings", "closet": extra_closet}
-                    if extra_closet
-                    else None
-                ),
-            })
-        except Exception as e:
-            return _json.dumps({"error": str(e)})
+        """DEPRECATED: Use mempalace_update(drawer_id=..., mode="distill") instead."""
+        # Thin wrapper — delegates to the unified update tool
+        return self._tool_update({
+            "drawer_id": args.get("drawer_id", ""),
+            "mode": "distill",
+            "closet": args.get("closet", ""),
+        })
 
     def _load_noise_patterns(self) -> List[str]:
         """Load noise patterns from config or defaults."""
@@ -3619,7 +3381,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_expiring(self, args: dict) -> str:
         """Preview drawers about to TTL-expire."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             from datetime import datetime, timedelta, timezone
@@ -3704,7 +3466,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_backup(self, args: dict) -> str:
         """Export palace drawers and KG to JSON."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             import uuid
@@ -3722,7 +3484,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
             backup_path.parent.mkdir(parents=True, exist_ok=True)
 
-            all_data = self._collection.get(include=["documents", "metadatas"])
+            all_data = self._collection.get(include=["documents", "metadatas", "ids"])
             drawers = []
             docs = all_data.get("documents", []) or []
             metas = all_data.get("metadatas", []) or []
@@ -3768,7 +3530,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_restore(self, args: dict) -> str:
         """Restore palace from JSON backup."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             from pathlib import Path
@@ -3832,7 +3594,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_session_diff(self, args: dict) -> str:
         """Show what changed between sessions."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             project = args.get("project", "")
@@ -3933,7 +3695,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_recall(self, args: dict) -> str:
         """Access learnings with semantic similarity and filters."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             from datetime import datetime, timezone
@@ -3971,42 +3733,74 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 raw_results = []
 
             items = []
-            for r in raw_results:
-                r_closet = r.get("closet", "")
-                r_category = r.get("category", "")
-                r_subject = r.get("subject", "")
-                r_flags = (
-                    json.loads(r.get("flags", "[]"))
-                    if isinstance(r.get("flags", []), str)
-                    and r.get("flags", "").startswith("[")
-                    else r.get("flags", [])
-                )
 
-                if closet and r_closet != closet:
-                    continue
-                if category and r_category != category:
-                    continue
-                if subject and r_subject != subject:
-                    continue
-                if flag:
-                    if isinstance(flag, list):
-                        if not any(f in r_flags for f in flag):
-                            continue
-                    elif flag not in r_flags:
+            # Phase 2: include mistakes in results when category is "mistake"
+            if category == "mistake":
+                try:
+                    mistake_results = self._collection.get(
+                        where={"wing": {"$eq": "wing_mistakes"}},
+                        include=["documents", "metadatas", "ids"],
+                    )
+                    m_docs = mistake_results.get("documents", []) or []
+                    m_metas = mistake_results.get("metadatas", []) or []
+                    m_ids = mistake_results.get("ids", []) or []
+                    for i, meta in enumerate(m_metas):
+                        items.append(
+                            {
+                                "id": m_ids[i] if i < len(m_ids) else "",
+                                "content": m_docs[i] if i < len(m_docs) else "",
+                                "subject": meta.get("subject", ""),
+                                "closet": meta.get("closet", ""),
+                                "category": meta.get("category", ""),
+                                "flags": json.loads(meta.get("flags", "[]"))
+                                if isinstance(meta.get("flags", []), str)
+                                and meta.get("flags", "").startswith("[")
+                                else meta.get("flags", []),
+                                "created_at": meta.get("created_at", ""),
+                                "similarity_score": 1.0,
+                            }
+                        )
+                except Exception:
+                    pass
+            else:
+                for r in raw_results:
+                    r_closet = r.get("closet", "")
+                    r_category = r.get("category", "")
+                    r_subject = r.get("subject", "")
+                    r_flags = (
+                        json.loads(r.get("flags", "[]"))
+                        if isinstance(r.get("flags", []), str)
+                        and r.get("flags", "").startswith("[")
+                        else r.get("flags", [])
+                    )
+
+                    if closet and r_closet != closet:
                         continue
+                    if category and r_category != category:
+                        continue
+                    if subject and r_subject != subject:
+                        continue
+                    if flag:
+                        if isinstance(flag, list):
+                            if not any(f in r_flags for f in flag):
+                                continue
+                        elif flag not in r_flags:
+                            continue
 
-                items.append(
-                    {
-                        "id": r.get("id", ""),
-                        "content": r.get("text", r.get("content", "")),
-                        "subject": r_subject,
-                        "closet": r_closet,
-                        "category": r_category,
-                        "flags": r_flags,
-                        "created_at": r.get("created_at", ""),
-                        "similarity_score": r.get("similarity", r.get("distance", 0)),
-                    }
-                )
+                    items.append(
+                        {
+                            "id": r.get("id", ""),
+                            "content": r.get("text", r.get("content", "")),
+                            "subject": r_subject,
+                            "closet": r_closet,
+                            "category": r_category,
+                            "flags": r_flags,
+                            "created_at": r.get("created_at", ""),
+                            "similarity_score": r.get(
+                                "similarity", r.get("distance", 0)
+                            ),
+                        }
+                    )
 
             total = len(items)
             paginated = items[offset : offset + limit]
@@ -4036,7 +3830,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_recall_all(self, args: dict) -> str:
         """Fetch all learnings at once."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             from datetime import datetime, timezone
@@ -4044,17 +3838,56 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             closet = args.get("closet", "")
             cap = min(args.get("cap", 20), 100)
             sort = args.get("sort", "recent")
+            category = args.get("category", "")
 
             # Optional closet filter — use ChromaDB $eq syntax
             if closet:
                 results = self._collection.get(
                     where={"closet": {"$eq": closet}},
-                    include=["documents", "metadatas"],
+                    include=["documents", "metadatas", "ids"],
                 )
             else:
                 results = self._collection.get(
-                    include=["documents", "metadatas"],
+                    include=["documents", "metadatas", "ids"],
                 )
+
+            # Phase 2: include mistakes in results
+            mistake_items = []
+            if not category or category == "mistake":
+                try:
+                    where_filter = {"wing": {"$eq": "wing_mistakes"}}
+                    mistake_results = self._collection.get(
+                        where=where_filter,
+                        include=["documents", "metadatas", "ids"],
+                    )
+                    m_docs = mistake_results.get("documents", []) or []
+                    m_metas = mistake_results.get("metadatas", []) or []
+                    m_ids = mistake_results.get("ids", []) or []
+                    for i, meta in enumerate(m_metas):
+                        if closet and meta.get("closet", "") != closet:
+                            continue
+                        if (
+                            category == "mistake"
+                            and meta.get("category", "") != "mistake"
+                        ):
+                            continue
+                        mistake_items.append(
+                            {
+                                "id": m_ids[i] if i < len(m_ids) else "",
+                                "content": m_docs[i] if i < len(m_docs) else "",
+                                "subject": meta.get("subject", ""),
+                                "closet": meta.get("closet", ""),
+                                "category": meta.get("category", ""),
+                                "flags": json.loads(meta.get("flags", "[]"))
+                                if isinstance(meta.get("flags", []), str)
+                                and meta.get("flags", "").startswith("[")
+                                else meta.get("flags", []),
+                                "created_at": meta.get("created_at", ""),
+                                "last_accessed": meta.get("last_accessed", ""),
+                            }
+                        )
+                except Exception:
+                    mistake_items = []
 
             docs = results.get("documents", []) or []
             metas = results.get("metadatas", []) or []
@@ -4077,6 +3910,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         "last_accessed": meta.get("last_accessed", ""),
                     }
                 )
+
+            # Append mistake items to regular items
+            items.extend(mistake_items)
 
             if sort == "accessed":
                 items.sort(key=lambda x: x.get("last_accessed", "") or "", reverse=True)
@@ -4107,7 +3943,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
 
     def _tool_learn(self, args: dict) -> str:
         """File new knowledge with auto-detection."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             auto_detect = args.get("auto_detect", False)
@@ -4119,6 +3955,33 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             category = args.get("category", "fact")
             closet = args.get("closet", "personal")
             source_session = args.get("source_session", "")
+
+            # Phase 1: route category="mistake" to wing_mistakes
+            domain = args.get("domain", "general")
+            severity = args.get("severity", "MED")
+            error_type = args.get("error_type", "runtime")
+            is_mistake = category == "mistake"
+
+            if is_mistake:
+                wing = "wing_mistakes"
+                room = f"room_{domain}"
+                closet = "hall_errors"
+                entity_code = f"{domain.upper()[:4]}_{len(content)}"
+                formatted_content = f"{entity_code} → {domain}|mistake|{content}|error_type:{error_type},severity:{severity}"
+                content_to_store = formatted_content
+            else:
+                wing = "wing_myos"
+                room = "learnings"
+                closet = args.get("closet", "personal")
+                content_to_store = content
+
+            if is_mistake and self._kg:
+                self._kg.add_triple(
+                    entity_code,
+                    "mistake",
+                    content,
+                    valid_from=datetime.now().isoformat(),
+                )
 
             if auto_detect and content:
                 # IMPROVE-3: recall-before-filing — do broad semantic search first
@@ -4175,8 +4038,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     )
 
             metadata = {
-                "wing": "wing_myos",
-                "room": "learnings",
+                "wing": wing,
+                "room": room,
                 "closet": closet,
                 "category": category,
                 "subject": subject,
@@ -4185,30 +4048,37 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 "source_session": source_session,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
+            if is_mistake:
+                metadata["domain"] = domain
+                metadata["severity"] = severity
+                metadata["error_type"] = error_type
 
             drawer_id = str(uuid.uuid4())
             self._collection.add(
                 ids=[drawer_id],
-                documents=[content],
+                documents=[content_to_store],
                 metadatas=[metadata],
             )
 
-            return json.dumps(
-                {
-                    "drawer_id": drawer_id,
-                    "title": title,
-                    "subject": subject,
-                    "closet": closet,
-                    "category": category,
-                    "stored": True,
-                }
-            )
+            result = {
+                "drawer_id": drawer_id,
+                "title": title,
+                "subject": subject,
+                "closet": closet,
+                "category": category,
+                "stored": True,
+            }
+            if is_mistake:
+                result["domain"] = domain
+                result["severity"] = severity
+                result["error_type"] = error_type
+            return json.dumps(result)
         except Exception as e:
             return json.dumps({"error": str(e)})
 
     def _tool_update(self, args: dict) -> str:
         """Modify existing learning entry."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             from datetime import datetime, timezone
@@ -4242,6 +4112,106 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             new_content = content
             if mode == "extend":
                 new_content = old_content + "\n---\n" + extend_with
+
+            if mode == "distill":
+                # Run LLM analysis on the content
+                domain = old_meta.get("domain", "general")
+                error_type = old_meta.get("error_type", "general")
+                analysis = self._run_distillation_analysis(
+                    old_content, domain, error_type
+                )
+                if "error" in analysis:
+                    return json.dumps(analysis)
+
+                root_cause = analysis["root_cause"]
+                lesson = analysis["lesson"]
+                counterfactual = analysis["counterfactual"]
+                related_concepts = analysis["related_concepts"]
+                improvement_score = analysis["improvement_score"]
+
+                # Format distilled lesson in AAAK
+                domain_code = domain.upper()[:4]
+                new_content = (
+                    f"LESSON → {domain_code}_{drawer_id[:8]}|mistake-distill|"
+                    f"root:{root_cause}|lesson:{lesson}|counterfactual:{counterfactual}|"
+                    f"concepts:{','.join(related_concepts)}|score:{improvement_score}/5"
+                )
+
+                # Build enriched metadata
+                new_meta = dict(old_meta)
+                new_meta["parent_id"] = drawer_id
+                new_meta["root_cause"] = root_cause
+                new_meta["lesson"] = lesson
+                new_meta["counterfactual"] = counterfactual
+                new_meta["related_concepts"] = related_concepts
+                new_meta["improvement_score"] = improvement_score
+                new_meta["distilled"] = True
+                new_meta["created_at"] = datetime.now(timezone.utc).isoformat()
+                new_meta["last_accessed"] = ""
+
+                # Add to ChromaDB
+                new_drawer_id = str(uuid.uuid4())
+                self._collection.add(
+                    ids=[new_drawer_id],
+                    documents=[new_content],
+                    metadatas=[new_meta],
+                )
+
+                # Cross-file to wing_general if this is a mistake
+                extra_closet = args.get("closet", "")
+                extra_drawer_id = None
+                if old_meta.get("wing") == "wing_mistakes" and extra_closet in ("personal", "projects", "world"):
+                    extra_drawer_id = str(uuid.uuid4())
+                    extra_doc = (
+                        f"LESSON → {domain_code}|lesson|{lesson}|"
+                        f"root_cause:{root_cause}|from_mistake:{drawer_id[:8]}"
+                    )
+                    extra_meta = {
+                        "wing": "wing_general",
+                        "room": "learnings",
+                        "closet": extra_closet,
+                        "parent_id": drawer_id,
+                        "lesson_id": new_drawer_id,
+                        "domain": domain,
+                        "subject": domain,
+                        "improvement_score": improvement_score,
+                        "distilled_from": "distill_mistake",
+                    }
+                    self._collection.add(
+                        documents=[extra_doc],
+                        metadatas=[extra_meta],
+                        ids=[extra_drawer_id],
+                    )
+                    self._update_taxonomy_cache("wing_general", "learnings", 1)
+
+                # KG triples
+                if self._kg:
+                    self._kg.add_triple(
+                        f"MISTAKE_{drawer_id[:8]}",
+                        "distilled_to_lesson",
+                        lesson,
+                        valid_from=datetime.now(timezone.utc).isoformat(),
+                    )
+                    self._kg.add_triple(
+                        new_drawer_id[:8],
+                        "root_cause",
+                        root_cause,
+                        valid_from=datetime.now(timezone.utc).isoformat(),
+                    )
+
+                return json.dumps(
+                    {
+                        "new_drawer_id": new_drawer_id,
+                        "parent_id": drawer_id,
+                        "root_cause": root_cause,
+                        "lesson": lesson,
+                        "counterfactual": counterfactual,
+                        "related_concepts": related_concepts,
+                        "improvement_score": improvement_score,
+                        "extra_drawer_id": extra_drawer_id,
+                        "mode": "distill",
+                    }
+                )
 
             if mode in ("replace", "correct"):
                 flags = old_meta.get("flags", [])
@@ -4294,9 +4264,79 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         except Exception as e:
             return json.dumps({"error": str(e)})
 
+    def _run_distillation_analysis(self, content: str, domain: str, error_type: str) -> dict:
+        """Run LLM analysis on any content to extract structured lessons."""
+        import re as _re
+
+        analysis_prompt = (
+            "You are a rigorous post-mortem analyst. Given recorded content, "
+            "produce a deep structural analysis. Return ONLY valid JSON with these exact keys:\n"
+            "{\n"
+            '  "root_cause": "...",\n'
+            '  "lesson": "...",\n'
+            '  "counterfactual": "...",\n'
+            '  "related_concepts": ["...", "..."],\n'
+            '  "improvement_score": N\n'
+            "}\n\n"
+            "Rules:\n"
+            "- root_cause: the fundamental reason this failed or underperformed (not just what happened)\n"
+            "- lesson: the actionable takeaway — what you should do differently\n"
+            "- counterfactual: what would have happened if the lesson had been applied\n"
+            "- related_concepts: 2-4 relevant topic tags (e.g. 'filter-syntax', 'chromadb', 'error-handling')\n"
+            "- improvement_score: 1-5, how actionable/transferable is this lesson\n"
+            "- Return ONLY the JSON. No markdown fences. No explanation.\n\n"
+            f"CONTENT: {content}\n"
+            f"DOMAIN: {domain}\n"
+            f"ERROR TYPE: {error_type}\n"
+        )
+
+        from hermes_tools import terminal
+
+        result = terminal(
+            command=(
+                f'python3 -c "\n'
+                f"import json, sys\n"
+                f"from anthropic import Anthropic\n"
+                f"client = Anthropic()\n"
+                f"msg = client.messages.create(\n"
+                f"    model='claude-opus-4-7-20251120',\n"
+                f"    max_tokens=1024,\n"
+                f"    messages=[{{'role': 'user', 'content': {repr(analysis_prompt)}}}]"
+                f")\n"
+                f"print(msg.content[0].text)\n"
+                f'"'
+            ),
+            timeout=30,
+        )
+
+        raw = result.get("output", "").strip()
+
+        # Try to extract JSON from the response
+        json_str = raw
+        if "```json" in raw:
+            json_str = raw.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw:
+            json_str = raw.split("```")[1].split("```")[0].strip()
+        first_brace = json_str.find("{")
+        if first_brace > 0:
+            json_str = json_str[first_brace:]
+
+        try:
+            analysis = json.loads(json_str)
+        except Exception:
+            return {"error": f"Failed to parse LLM analysis response: {raw[:500]}"}
+
+        return {
+            "root_cause": analysis.get("root_cause", "unknown"),
+            "lesson": analysis.get("lesson", "unknown"),
+            "counterfactual": analysis.get("counterfactual", "unknown"),
+            "related_concepts": analysis.get("related_concepts", []),
+            "improvement_score": int(analysis.get("improvement_score", 3)),
+        }
+
     def _tool_drawer_history(self, args: dict) -> str:
         """Get all versions of a drawer by following parent_id chain."""
-        if not self._collection:
+        if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
             drawer_id = args.get("drawer_id", "")
