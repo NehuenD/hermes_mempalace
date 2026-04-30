@@ -413,9 +413,10 @@ hermes mempalace mine ~/projects/myapp
 - `mempalace_graph_stats` — Connectivity stats
 
 ### Mistakes
-- `mempalace_record_mistake` — Record mistake
-- `mempalace_search_mistakes` — Search mistakes
-- `mempalace_recall_mistakes` — Recall by domain
+- `mempalace_record_mistake` — Record a mistake (domain, severity, error_type)
+- `mempalace_recall_mistakes` — Recall all mistakes for a domain
+- `mempalace_search_mistakes` — Search mistakes semantically
+- `mempalace_distill_mistake` — Distill a recorded mistake into a structured lesson
 
 ### Utilities
 - `mempalace_summarize` — Palace summary

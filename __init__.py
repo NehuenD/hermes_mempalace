@@ -620,6 +620,38 @@ SEARCH_MISTAKES_SCHEMA = {
     },
 }
 
+DISTILL_MISTAKE_SCHEMA = {
+    "name": "mempalace_distill_mistake",
+    "description": (
+        "Distill a recorded mistake into structured, retrievable learnings. "
+        "Runs a structured analysis — root cause, counterfactual, actionable lesson, "
+        "related concepts, and improvement score. Stores the distilled lesson as a new "
+        "drawer with parent_id linking to the original mistake. Returns the full "
+        "structured result so you can also file the lesson to personal/projects closets "
+        "via mempalace_learn. Use after any mistake to extract lasting wisdom from it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "drawer_id": {
+                "type": "string",
+                "description": "The drawer ID of the mistake to distill.",
+            },
+            "closet": {
+                "type": "string",
+                "enum": ["personal", "projects", "world"],
+                "description": (
+                    "Optional closet to file the distilled lesson into additionally. "
+                    "'projects' for technical/coding mistakes. "
+                    "'personal' for habits or character. "
+                    "Default: none — only stored in wing_mistakes."
+                ),
+            },
+        },
+        "required": ["drawer_id"],
+    },
+}
+
 RECORD_MISTAKE_SCHEMA = {
     "name": "mempalace_record_mistake",
     "description": (
@@ -1154,6 +1186,7 @@ ALL_TOOL_SCHEMAS = [
     RECORD_MISTAKE_SCHEMA,
     SEARCH_MISTAKES_SCHEMA,
     RECALL_MISTAKES_SCHEMA,
+    DISTILL_MISTAKE_SCHEMA,
     NOISE_FILTER_SCHEMA,
     EXPIRING_SCHEMA,
     BACKUP_SCHEMA,
@@ -1812,6 +1845,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 return self._tool_search_mistakes(args)
             elif tool_name == "mempalace_recall_mistakes":
                 return self._tool_recall_mistakes(args)
+            elif tool_name == "mempalace_distill_mistake":
+                return self._tool_distill_mistake(args)
             elif tool_name == "mempalace_noise_filter":
                 return self._tool_noise_filter(args)
             elif tool_name == "mempalace_expiring":
@@ -3319,6 +3354,198 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             )
         except Exception as e:
             return json.dumps({"error": str(e)})
+
+    def _tool_distill_mistake(self, args: dict) -> str:
+        """Run structured analysis on a mistake to extract lasting lessons."""
+        import json as _json
+        import uuid as _uuid
+        from datetime import datetime
+
+        if not self._collection:
+            return _json.dumps({"error": "Palace not initialized"})
+        try:
+            drawer_id = args.get("drawer_id", "")
+            extra_closet = args.get("closet", "")
+
+            # 1. Fetch the original mistake drawer
+            results = self._collection.get(
+                ids=[drawer_id],
+                include=["metadatas", "documents"],
+            )
+            documents = results.get("documents", [])
+            if not documents or documents == [None]:
+                return _json.dumps({"error": f"No drawer found with id: {drawer_id}"})
+
+            doc = documents[0]
+            meta = (results.get("metadatas") or [{}])[0]
+            domain = meta.get("domain", "general")
+            severity = meta.get("severity", "MED")
+            error_type = meta.get("error_type", "runtime")
+
+            # 2. Run structured LLM analysis
+            analysis_prompt = (
+                "You are a rigorous post-mortem analyst. Given a recorded mistake, "
+                "produce a deep structural analysis. Return ONLY valid JSON with these exact keys:\n"
+                "{\n"
+                '  "root_cause": "...",\n'
+                '  "lesson": "...",\n'
+                '  "counterfactual": "...",\n'
+                '  "related_concepts": ["...", "..."],\n'
+                '  "improvement_score": N\n'
+                "}\n\n"
+                "Rules:\n"
+                "- root_cause: the fundamental reason this failed (not just what happened)\n"
+                "- lesson: the actionable takeaway — what you should do differently\n"
+                "- counterfactual: what would have happened if you had applied the lesson\n"
+                "- related_concepts: 2-4 relevant topic tags (e.g. 'filter-syntax', 'chromadb', 'error-handling')\n"
+                "- improvement_score: 1-5, how actionable/transferable is this lesson\n"
+                "- Return ONLY the JSON. No markdown fences. No explanation.\n\n"
+                f"MISTAKE: {doc}\n"
+                f"DOMAIN: {domain}\n"
+                f"ERROR TYPE: {error_type}\n"
+                f"SEVERITY: {severity}\n"
+            )
+
+            from hermes_tools import terminal
+
+            analysis_result = terminal(
+                command=(
+                    f"python3 -c \"\n"
+                    f"import json, sys\n"
+                    f"from anthropic import Anthropic\n"
+                    f"client = Anthropic()\n"
+                    f"msg = client.messages.create(\n"
+                    f"    model='claude-opus-4-7-20251120',\n"
+                    f"    max_tokens=1024,\n"
+                    f"    messages=[{{'role': 'user', 'content': {repr(analysis_prompt)}}}]\n"
+                    f")\n"
+                    f"print(msg.content[0].text)\n"
+                    f"\""
+                ),
+                timeout=30,
+            )
+
+            raw = analysis_result.get("output", "").strip()
+
+            # Try to extract JSON from the response
+            json_str = raw
+            if "```json" in raw:
+                json_str = raw.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw:
+                json_str = raw.split("```")[1].split("```")[0].strip()
+            # Remove any leading non-JSON (e.g. "Here is the analysis:" prefix)
+            first_brace = json_str.find("{")
+            if first_brace > 0:
+                json_str = json_str[first_brace:]
+
+            analysis = {}
+            try:
+                analysis = _json.loads(json_str)
+            except Exception:
+                return _json.dumps({
+                    "error": "Failed to parse LLM analysis response",
+                    "raw": raw[:500],
+                    "hint": "The LLM may have returned non-JSON. Check the raw field or retry."
+                })
+
+            root_cause = analysis.get("root_cause", "unknown")
+            lesson = analysis.get("lesson", "unknown")
+            counterfactual = analysis.get("counterfactual", "unknown")
+            related_concepts = analysis.get("related_concepts", [])
+            improvement_score = int(analysis.get("improvement_score", 3))
+
+            # 3. Format and store distilled lesson in wing_mistakes
+            lesson_id = str(_uuid.uuid4())
+            lessons_doc = (
+                f"LESSON → {domain.upper()[:4]}_{drawer_id[:8]}|mistake-distill|"
+                f"root:{root_cause}|lesson:{lesson}|counterfactual:{counterfactual}|"
+                f"concepts:{','.join(related_concepts)}|score:{improvement_score}/5"
+            )
+            lesson_meta = {
+                "wing": "wing_mistakes",
+                "room": f"room_{domain}",
+                "closet": "hall_lessons",
+                "parent_id": drawer_id,
+                "domain": domain,
+                "severity": severity,
+                "error_type": error_type,
+                "root_cause": root_cause,
+                "lesson": lesson,
+                "counterfactual": counterfactual,
+                "improvement_score": improvement_score,
+                "distilled": True,
+                "related_concepts": related_concepts,
+            }
+
+            self._collection.add(
+                documents=[lessons_doc],
+                metadatas=[lesson_meta],
+                ids=[lesson_id],
+            )
+            self._update_taxonomy_cache("wing_mistakes", f"room_{domain}", 1)
+
+            # 4. Optionally file to wing_general for cross-domain recall
+            extra_drawer_id = None
+            if extra_closet in ("personal", "projects"):
+                extra_drawer_id = str(_uuid.uuid4())
+                extra_doc = (
+                    f"LESSON → {domain.upper()[:4]}|lesson|{lesson}|"
+                    f"root_cause:{root_cause}|from_mistake:{drawer_id[:8]}"
+                )
+                extra_meta = {
+                    "wing": "wing_general",
+                    "room": "learnings",
+                    "closet": extra_closet,
+                    "parent_id": drawer_id,
+                    "lesson_id": lesson_id,
+                    "domain": domain,
+                    "subject": domain,
+                    "improvement_score": improvement_score,
+                    "distilled_from": "distill_mistake",
+                }
+                self._collection.add(
+                    documents=[extra_doc],
+                    metadatas=[extra_meta],
+                    ids=[extra_drawer_id],
+                )
+                self._update_taxonomy_cache("wing_general", "learnings", 1)
+
+            # 5. Update KG if available
+            if self._kg:
+                self._kg.add_triple(
+                    f"MISTAKE_{drawer_id[:8]}",
+                    "distilled_to_lesson",
+                    lesson,
+                    valid_from=datetime.now().isoformat(),
+                )
+                self._kg.add_triple(
+                    lesson_id[:8],
+                    "root_cause",
+                    root_cause,
+                    valid_from=datetime.now().isoformat(),
+                )
+
+            return _json.dumps({
+                "drawer_id": lesson_id,
+                "parent_id": drawer_id,
+                "root_cause": root_cause,
+                "lesson": lesson,
+                "counterfactual": counterfactual,
+                "related_concepts": related_concepts,
+                "improvement_score": improvement_score,
+                "filed_to": {
+                    "wing": "wing_mistakes",
+                    "room": f"room_{domain}",
+                    "closet": "hall_lessons",
+                },
+                "also_filed_to": (
+                    {"wing": "wing_general", "room": "learnings", "closet": extra_closet}
+                    if extra_closet
+                    else None
+                ),
+            })
+        except Exception as e:
+            return _json.dumps({"error": str(e)})
 
     def _load_noise_patterns(self) -> List[str]:
         """Load noise patterns from config or defaults."""

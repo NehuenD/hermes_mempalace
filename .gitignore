@@ -74,3 +74,6 @@ IMPROVEMENTS.md
 WAKEUP_INVESTIGATION.md
 todo.md
 fixes.md
+
+# MemPalace runtime data (created at runtime, never commit)
+mempalace/

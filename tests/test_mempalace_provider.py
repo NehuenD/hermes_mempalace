@@ -4,7 +4,7 @@ import json
 import pytest
 from unittest.mock import MagicMock, patch
 
-from plugins.memory.mempalace import MempalaceMemoryProvider
+from plugins.mempalace import MempalaceMemoryProvider
 
 
 class FakeCollection:
