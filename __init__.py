@@ -551,6 +551,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 "Use mempalace_session_read at session start to restore project context.\n\n"
                 + learnings_block
                 + sessions_block
+                + self._get_strategies_block()
                 + aaak_guide
             )
         return (
@@ -564,8 +565,26 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             "Use mempalace_session_read at session start to restore project context.\n\n"
             + learnings_block
             + sessions_block
+            + self._get_strategies_block()
             + aaak_guide
         )
+
+    def _get_strategies_block(self) -> str:
+        """Inject relevant past strategies into system prompt."""
+        try:
+            from mempalace.strategy_system import retrieve_relevant_strategies, build_strategy_block
+
+            query = getattr(self, "_current_query", "")
+            if query and self._ensure_palace() and self._collection:
+                strategies = retrieve_relevant_strategies(
+                    self._collection, query, top_k=1
+                )
+                block = build_strategy_block(strategies)
+                return block
+        except Exception as e:
+            logger.debug("Strategy injection skipped: %s", e)
+        return ""
+
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         if self._prefetch_thread and self._prefetch_thread.is_alive():
             self._prefetch_thread.join(timeout=3.0)
@@ -871,6 +890,36 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         logger.debug("Added auto diary entry for session")
                     except Exception as e:
                         logger.debug("Failed to create diary entry: %s", e)
+
+                # Phase 1: Extract strategies from session trajectory
+                try:
+                    from mempalace.extraction import extract_strategies_from_trajectory, store_extraction
+
+                    trajectory_lines = []
+                    for msg in messages[-10:]:
+                        role = msg.get("role", "")
+                        content = msg.get("content", "")
+                        if content:
+                            trajectory_lines.append(f"[{role}]: {str(content)[:500]}")
+                    trajectory_text = "\n".join(trajectory_lines)
+
+                    if trajectory_text and len(trajectory_text) > 100:
+                        strategies = extract_strategies_from_trajectory(
+                            trajectory_text,
+                            llm_call_fn=None,
+                        )
+                        if strategies:
+                            store_extraction(
+                                self._collection,
+                                strategies,
+                                source_session=str(id(self)),
+                            )
+                            logger.info(
+                                "Extracted %d strategies from session",
+                                len(strategies),
+                            )
+                except Exception as e:
+                    logger.debug("Strategy extraction skipped: %s", e)
 
             except Exception as e:
                 logger.debug("Session end extraction failed: %s", e)

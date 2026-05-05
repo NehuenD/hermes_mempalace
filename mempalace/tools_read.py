@@ -223,7 +223,7 @@ class ReadToolsMixin:
             closet = args.get("closet", "")
             category = args.get("category", "")
             flag = args.get("flag", [])
-            limit = args.get("limit", 3)
+            limit = args.get("limit", 1)
             offset = args.get("offset", 0)
 
             limit = min(max(1, limit), 10)

@@ -75,5 +75,12 @@ WAKEUP_INVESTIGATION.md
 todo.md
 fixes.md
 
+# OpenCode scratch artifacts
+opencode_*.txt
+refactor.py
+
 # MemPalace runtime data (created at runtime, never commit)
 mempalace/
+
+# Phase 0 refactoring log (stale, kept for reference — not committed)
+REFACTOR.md
