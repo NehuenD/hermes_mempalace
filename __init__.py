@@ -793,6 +793,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             return json.dumps({"error": str(e)})
     def on_turn_start(self, turn_number: int, message: str, **kwargs) -> None:
         self._turn_count = turn_number
+        self._current_query = message
         remaining_tokens = kwargs.get("remaining_tokens")
         if remaining_tokens and remaining_tokens < 2000:
             logger.debug("Low token context: triggering prefetch")
