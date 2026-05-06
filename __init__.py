@@ -579,7 +579,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                 strategies = retrieve_relevant_strategies(
                     self._collection, query, top_k=1
                 )
-                block = build_strategy_block(strategies)
+                block = build_strategy_block(strategies, current_query=query)
                 return block
         except Exception as e:
             logger.debug("Strategy injection skipped: %s", e)
@@ -892,24 +892,59 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     except Exception as e:
                         logger.debug("Failed to create diary entry: %s", e)
 
-                # Phase 1: Extract strategies from session trajectory
+                # Phase 1+2: Judge session and extract strategies
                 try:
-                    from mempalace.extraction import extract_strategies_from_trajectory, store_extraction
+                    rb_config = (self._config or {}).get("reasoning_bank", {})
+                    if not rb_config.get("enabled", True):
+                        return
 
-                    trajectory_lines = []
-                    for msg in messages[-10:]:
-                        role = msg.get("role", "")
-                        content = msg.get("content", "")
-                        if content:
-                            trajectory_lines.append(f"[{role}]: {str(content)[:500]}")
-                    trajectory_text = "\n".join(trajectory_lines)
+                    from mempalace.extraction import (
+                        extract_strategies_from_trajectory,
+                        store_extraction,
+                    )
+                    from mempalace.llm_judge import (
+                        judge_session,
+                        build_llm_call_fn,
+                        condense_trajectory,
+                    )
+
+                    trajectory_text = condense_trajectory(
+                        messages, max_last_n=10
+                    )
 
                     if trajectory_text and len(trajectory_text) > 100:
+                        # Phase 2: Build LLM call function
+                        llm_fn = build_llm_call_fn(
+                            provider_override=rb_config.get("provider"),
+                            model_override=rb_config.get("model"),
+                        )
+                        judgment = None
+
+                        if llm_fn:
+                            # Judge the session outcome
+                            judgment = judge_session(
+                                trajectory_text, llm_fn
+                            )
+                            if judgment.get("success") is not None:
+                                logger.info(
+                                    "Session judged: success=%s, "
+                                    "domain=%s, goal=%s",
+                                    judgment["success"],
+                                    judgment["domain"],
+                                    judgment["task_goal"],
+                                )
+
+                        # Extract strategies (real LLM if fn available,
+                        # sample data otherwise)
                         strategies = extract_strategies_from_trajectory(
                             trajectory_text,
-                            llm_call_fn=None,
+                            llm_call_fn=llm_fn,
                         )
+
                         if strategies:
+                            meta = {}
+                            if judgment:
+                                meta["judgment"] = judgment
                             store_extraction(
                                 self._collection,
                                 strategies,
@@ -919,6 +954,47 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                                 "Extracted %d strategies from session",
                                 len(strategies),
                             )
+
+                        # Phase 2: Consolidation (dedup + prune + confidence)
+                        cons_cfg = rb_config.get("consolidation", {})
+                        if llm_fn and strategies:
+                            try:
+                                from mempalace.consolidation import (
+                                    consolidate_strategies,
+                                )
+
+                                cons_result = consolidate_strategies(
+                                    self._collection,
+                                    llm_call_fn=llm_fn,
+                                    similarity_threshold=cons_cfg.get(
+                                        "similarity_threshold", 0.85
+                                    ),
+                                    min_confidence=cons_cfg.get(
+                                        "min_confidence", 0.15
+                                    ),
+                                    max_age_days=cons_cfg.get(
+                                        "max_age_days", 90
+                                    ),
+                                    max_merges=cons_cfg.get(
+                                        "max_merges_per_cycle", 5
+                                    ),
+                                )
+                                if (
+                                    cons_result.get("merges_done", 0) > 0
+                                    or cons_result.get("prune", {}).get(
+                                        "pruned_total", 0
+                                    )
+                                    > 0
+                                ):
+                                    logger.info(
+                                        "Consolidation: %d merges, %d pruned",
+                                        cons_result["merges_done"],
+                                        cons_result["prune"]["pruned_total"],
+                                    )
+                            except Exception as e:
+                                logger.debug(
+                                    "Consolidation skipped: %s", e
+                                )
                 except Exception as e:
                     logger.debug("Strategy extraction skipped: %s", e)
 

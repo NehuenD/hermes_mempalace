@@ -253,7 +253,7 @@ After Phase 0, each part of MemPalace lives in exactly one file:
 |-------|--------|-------|
 | Phase 0 (Refactor) | **COMPLETE** | All 11 submodule extraction tasks done, __init__.py reduced from 4590→~2000 lines |
 | Phase 1 (Doable RB) | **COMPLETE** | All 5 features (top-k=1, extraction.py, strategy_system.py, retrieval.py, abstraction constraints) implemented and wired into lifecycle |
-| Phase 2 (Moderate RB) | **NEXT** | llm_judge.py, consolidation.py, self-contrast |
+|| Phase 2 (Moderate RB) | **COMPLETE** | llm_judge.py ✅, consolidation.py ✅, self-contrast ✅, config wiring ✅ |
 | Phase 3 (Complex RB) | **QUEUED** | trajectory.py, matts.py |
 
-*Last updated: 2026-05-05*
+*Last updated: 2026-05-06*

@@ -123,6 +123,41 @@ class MempalaceConfig:
         """Mapping of hall names to keyword lists."""
         return self._file_config.get("hall_keywords", DEFAULT_HALL_KEYWORDS)
 
+    @property
+    def reasoning_bank(self) -> dict:
+        """
+        ReasoningBank configuration.
+
+        Returns dict with:
+            enabled (bool): Whether ReasoningBank runs on session end.
+            provider (str|None): Override LLM provider. None = auto-detect.
+            model (str|None): Override LLM model. None = auto-detect.
+            consolidation (dict): Thresholds for the consolidation cycle.
+                similarity_threshold (float, default 0.85)
+                min_confidence (float, default 0.15)
+                max_age_days (int, default 90)
+                max_merges_per_cycle (int, default 5)
+        """
+        defaults = {
+            "enabled": True,
+            "provider": None,
+            "model": None,
+            "consolidation": {
+                "similarity_threshold": 0.85,
+                "min_confidence": 0.15,
+                "max_age_days": 90,
+                "max_merges_per_cycle": 5,
+            },
+        }
+        rb_config = self._file_config.get("reasoning_bank", {})
+        merged = dict(defaults)
+        merged.update(rb_config)
+        # Merge consolidation sub-dict
+        cons_default = dict(defaults["consolidation"])
+        cons_default.update(rb_config.get("consolidation", {}))
+        merged["consolidation"] = cons_default
+        return merged
+
     def init(self):
         """Create config directory and write default config.json if it doesn't exist."""
         self._config_dir.mkdir(parents=True, exist_ok=True)

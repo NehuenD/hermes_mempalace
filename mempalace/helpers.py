@@ -34,6 +34,17 @@ def load_config() -> dict:
         "collection_name": os.environ.get("MEMPALACE_COLLECTION", _DEFAULT_COLLECTION),
         "default_wing": os.environ.get("MEMPALACE_DEFAULT_WING", _DEFAULT_WING),
         "ttl_days": int(os.environ.get("MEMPALACE_TTL_DAYS", _DEFAULT_TTL_DAYS)),
+        "reasoning_bank": {
+            "enabled": True,
+            "provider": None,
+            "model": None,
+            "consolidation": {
+                "similarity_threshold": 0.85,
+                "min_confidence": 0.15,
+                "max_age_days": 90,
+                "max_merges_per_cycle": 5,
+            },
+        },
     }
 
     config_path = get_hermes_home() / ".mempalace" / "config.json"
