@@ -34,9 +34,8 @@ No separate installation needed.
 
 
 def is_available() -> bool:
-    """Check if mempalace is installed and importable."""
+    """Check if mempalace dependencies are available."""
     try:
-        import mempalace
         import chromadb
         import yaml
 

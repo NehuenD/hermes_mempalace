@@ -15,19 +15,20 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Ensure local mempalace/ subpackage shadows PyPI package
+# Ensure local plugin modules shadow any PyPI mempalace package
 _this_dir = os.path.dirname(os.path.abspath(__file__))
-_plugin_dir = os.path.dirname(_this_dir)  # one level up from mempalace/ subpackage
-_mempalace_local = os.path.join(_plugin_dir, 'mempalace', '__init__.py')
-if _plugin_dir not in sys.path:
-    sys.path.insert(0, _plugin_dir)
+# _this_dir is now the plugin root (flat structure, no subpackage)
+if _this_dir not in sys.path:
+    sys.path.insert(0, _this_dir)
+
+# Purge any cached PyPI mempalace module
 if 'mempalace' in sys.modules:
     _mp_mod = sys.modules['mempalace']
-    if not hasattr(_mp_mod, '__file__') or not os.path.samefile(
-        os.path.dirname(os.path.abspath(_mp_mod.__file__)),
-        os.path.dirname(os.path.abspath(_mempalace_local)),
-    ):
-        del sys.modules['mempalace']
+    _local_init = os.path.join(_this_dir, '__init__.py')
+    if hasattr(_mp_mod, '__file__') and _mp_mod.__file__ is not None:
+        _mod_dir = os.path.dirname(os.path.abspath(_mp_mod.__file__))
+        if not os.path.samefile(_mod_dir, _this_dir):
+            del sys.modules['mempalace']
 
 from .bootstrap import ensure_local_imports, purge_pypi_mempalace
 
