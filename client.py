@@ -7,18 +7,29 @@ Handles import safety and provides utility functions.
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Ensure the local mempalace package is on sys.path
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+if _this_dir not in sys.path:
+    sys.path.insert(0, _this_dir)
+# If mempalace is cached from a different location, remove it
+if 'mempalace' in sys.modules:
+    _mp_mod = sys.modules['mempalace']
+    if not hasattr(_mp_mod, '__file__') or not os.path.samefile(
+        os.path.dirname(os.path.abspath(_mp_mod.__file__)),
+        _this_dir,
+    ):
+        del sys.modules['mempalace']
 
 logger = logging.getLogger(__name__)
 
 MEMPALACE_IMPORT_ERROR = """
-MemPalace not installed. Install with:
-    pip install mempalace
-
-Or for development:
-    git clone https://github.com/milla-jovovich/mempalace.git
-    cd mempalace && pip install -e .
+MemPalace is built-in to the Hermes plugin.
+No separate installation needed.
 """
 
 
@@ -60,7 +71,7 @@ class MempalaceClient:
 
         try:
             import chromadb
-            from mempalace.knowledge_graph import KnowledgeGraph
+            from .knowledge_graph import KnowledgeGraph
 
             palace_dir = self.palace_path / "palace"
             palace_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +116,7 @@ class MempalaceClient:
             return []
 
         try:
-            from mempalace.searcher import search_memories
+            from .searcher import search_memories
 
             results = search_memories(
                 query,

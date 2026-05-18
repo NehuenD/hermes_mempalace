@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from mempalace.helpers import _is_noise, _parse_natural_fact
+from .bootstrap import ensure_local_imports
+from .helpers import _is_noise, _parse_natural_fact
+
+ensure_local_imports()
 
 _DEFAULT_TTL_DAYS = 90
 
@@ -189,12 +191,8 @@ class WriteToolsMixin:
 
         try:
             import uuid
-            import sys
 
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from mempalace.general_extractor import extract_memories
+            from .general_extractor import extract_memories
 
             content = args.get("content", "")
 
@@ -388,11 +386,6 @@ class WriteToolsMixin:
                 )
 
             if auto_detect and content:
-                import sys
-
-                _plugin_dir = Path(__file__).parent / "mempalace"
-                if str(_plugin_dir) not in sys.path:
-                    sys.path.insert(0, str(_plugin_dir))
                 from searcher import search_memories
 
                 SIMILARITY_THRESHOLD = 0.85

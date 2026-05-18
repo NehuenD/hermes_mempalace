@@ -9,6 +9,10 @@ import json
 
 from pathlib import Path
 
+from .bootstrap import ensure_local_imports
+
+ensure_local_imports()
+
 
 class MetaToolsMixin:
     """Mixin providing meta/utility tools.
@@ -170,11 +174,6 @@ class MetaToolsMixin:
                 watch_id = str(uuid.uuid4())
 
             try:
-                import sys
-
-                _plugin_dir = Path(__file__).parent / "mempalace"
-                if str(_plugin_dir) not in sys.path:
-                    sys.path.insert(0, str(_plugin_dir))
                 from searcher import search_memories
 
                 n_to_fetch = limit * 5
@@ -608,7 +607,7 @@ class MetaToolsMixin:
 
             backup_path.parent.mkdir(parents=True, exist_ok=True)
 
-            all_data = self._collection.get(include=["documents", "metadatas", "ids"])
+            all_data = self._collection.get(include=["documents", "metadatas"])
             drawers = []
             docs = all_data.get("documents", []) or []
             metas = all_data.get("metadatas", []) or []

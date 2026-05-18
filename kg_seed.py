@@ -15,14 +15,33 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Ensure local mempalace/ subpackage shadows PyPI package
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_plugin_dir = os.path.dirname(_this_dir)  # one level up from mempalace/ subpackage
+_mempalace_local = os.path.join(_plugin_dir, 'mempalace', '__init__.py')
+if _plugin_dir not in sys.path:
+    sys.path.insert(0, _plugin_dir)
+if 'mempalace' in sys.modules:
+    _mp_mod = sys.modules['mempalace']
+    if not hasattr(_mp_mod, '__file__') or not os.path.samefile(
+        os.path.dirname(os.path.abspath(_mp_mod.__file__)),
+        os.path.dirname(os.path.abspath(_mempalace_local)),
+    ):
+        del sys.modules['mempalace']
+
+from .bootstrap import ensure_local_imports, purge_pypi_mempalace
+
+ensure_local_imports()
+purge_pypi_mempalace()
+
 
 def get_kg():
     try:
-        from mempalace.knowledge_graph import KnowledgeGraph
+        from .knowledge_graph import KnowledgeGraph
 
         return KnowledgeGraph()
     except ImportError:
-        print("ERROR: mempalace not installed. pip install mempalace")
+        print("ERROR: mempalace.knowledge_graph module not found in local plugin subpackage")
         sys.exit(1)
 
 

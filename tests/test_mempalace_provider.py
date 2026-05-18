@@ -60,7 +60,7 @@ class TestMempalaceProvider:
     def test_get_tool_schemas(self):
         provider = MempalaceMemoryProvider()
         schemas = provider.get_tool_schemas()
-        assert len(schemas) == 20
+        assert len(schemas) == 45
         tool_names = {s["name"] for s in schemas}
         assert "mempalace_status" in tool_names
         assert "mempalace_search" in tool_names

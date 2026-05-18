@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 
-from pathlib import Path
+from .bootstrap import ensure_local_imports
+
+ensure_local_imports()
 
 
 class NavigationMixin:
@@ -25,12 +27,7 @@ class NavigationMixin:
 
     def _tool_traverse(self, args: dict) -> str:
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from mempalace.palace_graph import traverse
+            from .palace_graph import traverse
 
             start_room = args.get("start_room", "")
             max_hops = args.get("max_hops", args.get("max_depth", 3))
@@ -42,12 +39,7 @@ class NavigationMixin:
             return json.dumps({"error": str(e)})
     def _tool_find_tunnels(self, args: dict) -> str:
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from mempalace.palace_graph import find_tunnels
+            from .palace_graph import find_tunnels
 
             wing_a = args.get("wing_a", "")
             wing_b = args.get("wing_b", "")
@@ -59,12 +51,7 @@ class NavigationMixin:
             return json.dumps({"error": str(e)})
     def _tool_graph_stats(self) -> str:
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from mempalace.palace_graph import graph_stats
+            from .palace_graph import graph_stats
 
             stats = graph_stats(col=self._collection)
             return json.dumps({"graph_stats": stats})

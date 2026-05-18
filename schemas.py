@@ -1038,8 +1038,50 @@ DISTILL_MISTAKE_SCHEMA = {
     },
 }
 
+REVIEW_SCHEMA = {
+    "name": "mempalace_review",
+    "description": (
+        "Find content review candidates — stale, duplicate, or room-specific. "
+        "Surfaces previews for the user to decide what to keep or delete. "
+        "Key constraint: FINAL decision is always the user. No auto-pruning."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["stale", "duplicates", "all"],
+                "description": (
+                    "'stale' — not accessed in N days. "
+                    "'duplicates' — exact or near-exact content matches. "
+                    "'all' — both stale and duplicate candidates (default)."
+                ),
+            },
+            "wing": {
+                "type": "string",
+                "description": "Filter by wing (optional).",
+            },
+            "room": {
+                "type": "string",
+                "description": "Filter by room (optional).",
+            },
+            "days": {
+                "type": "integer",
+                "description": "Staleness threshold in days (default: 30).",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Max candidates to return (default: 50).",
+            },
+        },
+        "required": [],
+    },
+}
+
+
 ALL_TOOL_SCHEMAS = [
     STATUS_SCHEMA,
+    REVIEW_SCHEMA,
     LIST_WINGS_SCHEMA,
     LIST_ROOMS_SCHEMA,
     GET_TAXONOMY_SCHEMA,
@@ -1131,4 +1173,5 @@ __all__ = [
     "SWEEP_SCHEMA",
     "DISTILL_MISTAKE_SCHEMA",
     "ALL_TOOL_SCHEMAS",
+    "REVIEW_SCHEMA",
 ]

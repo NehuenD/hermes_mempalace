@@ -15,9 +15,23 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+# Ensure the local mempalace package is on sys.path
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+if _this_dir not in sys.path:
+    sys.path.insert(0, _this_dir)
+# If mempalace is cached from a different location, remove it
+if 'mempalace' in sys.modules:
+    _mp_mod = sys.modules['mempalace']
+    if not hasattr(_mp_mod, '__file__') or not os.path.samefile(
+        os.path.dirname(os.path.abspath(_mp_mod.__file__)),
+        _this_dir,
+    ):
+        del sys.modules['mempalace']
 
 logger = logging.getLogger(__name__)
 
@@ -399,18 +413,7 @@ def cmd_setup(args, config) -> int:
     default_wing = input("Default wing [wing_general]: ").strip() or "wing_general"
 
     print()
-    print("Checking mempalace installation...")
-    try:
-        import mempalace
-
-        version = getattr(mempalace, "__version__", "unknown")
-        print(f"  mempalace {version} installed")
-    except ImportError:
-        print("  ERROR: mempalace not installed")
-        print()
-        print("Install with: pip install mempalace")
-        return 1
-
+    print("MemPalace plugin is active.")
     from hermes_constants import get_hermes_home, display_hermes_home
 
     hermes_home = get_hermes_home()
@@ -453,9 +456,9 @@ def cmd_status(args) -> int:
     """Show palace overview."""
     try:
         import chromadb
-        from mempalace.config import MempalaceConfig
+        from .config import MempalaceConfig
     except ImportError:
-        print("MemPalace not installed. Install with: pip install mempalace")
+        print("MemPalace not initialized. Run: hermes mempalace init")
         return 1
 
     try:
@@ -548,7 +551,7 @@ def cmd_init(args) -> int:
     print(f"Initializing palace at {directory}")
 
     try:
-        from mempalace.onboarding import run_onboarding
+        from .onboarding import run_onboarding
 
         run_onboarding(str(directory))
         print(f"Palace initialized at {directory}")
@@ -556,8 +559,9 @@ def cmd_init(args) -> int:
         print("Next: hermes mempalace mine <directory> to populate memory")
         return 0
     except ImportError:
-        print("ERROR: mempalace not installed")
-        print("Install: pip install mempalace")
+        print("ERROR: Palace initialization wizard not available")
+        print("Create the directory manually and configure in hermes config:")
+        print(f"  mkdir -p {directory}")
         return 1
     except Exception as e:
         print(f"Error: {e}")
@@ -572,30 +576,19 @@ def cmd_mine(args) -> int:
 
     print(f"Mining {directory} (mode={mode})")
 
-    cmd = [sys.executable, "-m", "mempalace", "mine", str(directory), "--mode", mode]
-    if wing:
-        cmd.extend(["--wing", wing])
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
-        return result.returncode
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
+    print("Mining is handled automatically by the Hermes agent.")
+    print("Use 'hermes mempalace memories' to view stored data.")
+    print(f"The palace directory is at {directory}")
+    return 0
 
 
 def cmd_memories(args) -> int:
     """List all stored memories."""
     try:
-        from mempalace.config import MempalaceConfig
+        from .config import MempalaceConfig
         import chromadb
     except ImportError:
-        print("ERROR: mempalace not installed")
-        print("Install: pip install mempalace")
+        print("ERROR: Cannot load MemPalace config")
         return 1
 
     config = MempalaceConfig()
@@ -668,11 +661,10 @@ def cmd_memories(args) -> int:
 def cmd_wings(args) -> int:
     """List all wings and their rooms."""
     try:
-        from mempalace.config import MempalaceConfig
+        from .config import MempalaceConfig
         import chromadb
     except ImportError:
-        print("ERROR: mempalace not installed")
-        print("Install: pip install mempalace")
+        print("ERROR: Cannot load MemPalace config")
         return 1
 
     config = MempalaceConfig()

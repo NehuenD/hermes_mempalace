@@ -39,14 +39,14 @@ _DEFAULT_PALACE_PATH = "~/.mempalace/"
 _DEFAULT_COLLECTION = "mempalace_drawers"
 _DEFAULT_WING = "wing_general"
 _DEFAULT_TTL_DAYS = 90
-from mempalace.tools_write import WriteToolsMixin
-from mempalace.tools_read import ReadToolsMixin
-from mempalace.tools_diary import DiaryMixin
-from mempalace.tools_knowledge import KnowledgeMixin
-from mempalace.tools_meta import MetaToolsMixin
-from mempalace.tools_mistake import MistakeMixin
-from mempalace.tools_nav import NavigationMixin
-from mempalace.helpers import (
+from .tools_write import WriteToolsMixin
+from .tools_read import ReadToolsMixin
+from .tools_diary import DiaryMixin
+from .tools_knowledge import KnowledgeMixin
+from .tools_meta import MetaToolsMixin
+from .tools_mistake import MistakeMixin
+from .tools_nav import NavigationMixin
+from .helpers import (
     _load_config,
     _get_palace_path,
     _is_noise,
@@ -57,9 +57,12 @@ from mempalace.helpers import (
     _load_noise_patterns,
     _save_noise_patterns,
 )
-from mempalace.schemas import ALL_TOOL_SCHEMAS
-from mempalace.config import MempalaceConfig
-from mempalace.layers import Layer0, Layer1
+from .schemas import ALL_TOOL_SCHEMAS
+from .config import MempalaceConfig
+from .layers import Layer0, Layer1
+from .bootstrap import ensure_local_imports
+
+ensure_local_imports()
 
 class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, NavigationMixin, DiaryMixin, MistakeMixin, MetaToolsMixin, MemoryProvider):
     """MemPalace local-first memory with palace structure and AAAK compression."""
@@ -95,7 +98,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
             _plugin_dir = Path(__file__).parent / "mempalace"
             if str(_plugin_dir) not in sys.path:
                 sys.path.insert(0, str(_plugin_dir))
-            from mempalace.config import MempalaceConfig
+            from .config import MempalaceConfig
 
             return True
         except ImportError:
@@ -144,7 +147,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
             _plugin_dir = Path(__file__).parent / "mempalace"
             if str(_plugin_dir) not in sys.path:
                 sys.path.insert(0, str(_plugin_dir))
-            from mempalace.knowledge_graph import KnowledgeGraph
+            from .knowledge_graph import KnowledgeGraph
 
             self._chroma_client = chromadb.PersistentClient(
                 path=str(self._palace_path / "palace")
@@ -182,7 +185,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
             _plugin_dir = Path(__file__).parent / "mempalace"
             if str(_plugin_dir) not in sys.path:
                 sys.path.insert(0, str(_plugin_dir))
-            from mempalace.layers import Layer0, Layer1
+            from .layers import Layer0, Layer1
 
             palace_str = str(self._palace_path / "palace")
 
@@ -572,7 +575,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
     def _get_strategies_block(self) -> str:
         """Inject relevant past strategies into system prompt."""
         try:
-            from mempalace.strategy_system import retrieve_relevant_strategies, build_strategy_block
+            from .strategy_system import retrieve_relevant_strategies, build_strategy_block
 
             query = getattr(self, "_current_query", "")
             if query and self._ensure_palace() and self._collection:
@@ -898,11 +901,11 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                     if not rb_config.get("enabled", True):
                         return
 
-                    from mempalace.extraction import (
+                    from .extraction import (
                         extract_strategies_from_trajectory,
                         store_extraction,
                     )
-                    from mempalace.llm_judge import (
+                    from .llm_judge import (
                         judge_session,
                         build_llm_call_fn,
                         condense_trajectory,
@@ -959,7 +962,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                         cons_cfg = rb_config.get("consolidation", {})
                         if llm_fn and strategies:
                             try:
-                                from mempalace.consolidation import (
+                                from .consolidation import (
                                     consolidate_strategies,
                                 )
 

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from .bootstrap import ensure_local_imports
+
+ensure_local_imports()
 
 logger = logging.getLogger(__name__)
 
@@ -129,10 +132,7 @@ class ReadToolsMixin:
         if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from searcher import search_memories
+            from .searcher import search_memories
 
             query = args.get("query", "")
             wing = args.get("wing")
@@ -140,18 +140,21 @@ class ReadToolsMixin:
             offset = args.get("offset", 0)
             limit = args.get("limit", 10)
             results = search_memories(
-                collection=self._collection,
                 query=query,
+                palace_path=str(self._palace_path / "palace"),
                 wing=wing,
                 room=room,
-                offset=offset,
-                limit=limit,
-                embeddings=self._query_embeddings,
+                n_results=offset + limit,
+                client=self._chroma_client,
             )
+            if "error" in results:
+                return json.dumps(results)
+            hits = results.get("results", [])
+            paginated = hits[offset : offset + limit]
             return json.dumps(
                 {
-                    "results": results,
-                    "total": len(results),
+                    "results": paginated,
+                    "total": len(hits),
                 }
             )
         except Exception as e:
@@ -210,12 +213,6 @@ class ReadToolsMixin:
         if not self._ensure_palace():
             return json.dumps({"error": "Palace not initialized"})
         try:
-            from datetime import datetime, timezone
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
             from searcher import search_memories
 
             query = args.get("query", "") or args.get("similarity", "")
@@ -251,7 +248,7 @@ class ReadToolsMixin:
                 try:
                     mistake_results = self._collection.get(
                         where={"wing": {"$eq": "wing_mistakes"}},
-                        include=["documents", "metadatas", "ids"],
+                        include=["documents", "metadatas"],
                     )
                     m_docs = mistake_results.get("documents", []) or []
                     m_metas = mistake_results.get("metadatas", []) or []

@@ -6,8 +6,11 @@ Extracted from monolithic __init__.py during Phase 0 refactoring.
 from __future__ import annotations
 
 import json
+import logging
 
-from pathlib import Path
+from .bootstrap import ensure_local_imports
+
+ensure_local_imports()
 
 
 class DiaryMixin:
@@ -25,12 +28,7 @@ class DiaryMixin:
 
     def _tool_diary_write(self, args: dict) -> str:
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from mempalace.mcp_server import tool_diary_write
+            from .mcp_server import tool_diary_write
 
             agent = args.get("agent", "")
             entry = args.get("entry", "")
@@ -42,12 +40,7 @@ class DiaryMixin:
             return json.dumps({"error": str(e)})
     def _tool_diary_read(self, args: dict) -> str:
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from mempalace.mcp_server import tool_diary_read
+            from .mcp_server import tool_diary_read
 
             agent = args.get("agent", "")
             last_n = args.get("last_n", 10)
