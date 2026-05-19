@@ -6,10 +6,14 @@ Extracted from monolithic __init__.py during Phase 0 refactoring.
 from __future__ import annotations
 
 import json
+import logging
+import os
 
 from pathlib import Path
 
 from .bootstrap import ensure_local_imports
+
+logger = logging.getLogger(__name__)
 
 ensure_local_imports()
 

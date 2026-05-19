@@ -46,6 +46,7 @@ from .tools_knowledge import KnowledgeMixin
 from .tools_meta import MetaToolsMixin
 from .tools_mistake import MistakeMixin
 from .tools_nav import NavigationMixin
+from .tools_hygiene import HygieneMixin
 from .helpers import (
     _load_config,
     _get_palace_path,
@@ -64,7 +65,7 @@ from .bootstrap import ensure_local_imports
 
 ensure_local_imports()
 
-class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, NavigationMixin, DiaryMixin, MistakeMixin, MetaToolsMixin, MemoryProvider):
+class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, NavigationMixin, DiaryMixin, MistakeMixin, MetaToolsMixin, HygieneMixin, MemoryProvider):
     """MemPalace local-first memory with palace structure and AAAK compression."""
     def __init__(self):
         self._config = None
