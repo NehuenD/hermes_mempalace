@@ -4,3 +4,6 @@ description: "MemPalace — local-first AI memory with palace structure (Wings/R
 pip_dependencies:
   - chromadb>=0.4.0
   - pyyaml>=6.0
+python_dependencies:
+  - chromadb>=0.4.0
+  - pyyaml>=6.0
