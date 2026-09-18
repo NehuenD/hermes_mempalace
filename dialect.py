@@ -3,7 +3,7 @@
 AAAK Dialect -- Compressed Symbolic Memory Language
 ====================================================
 
-A structured symbolic format that ANY LLM reads natively at ~30x compression.
+A structured symbolic format that ANY LLM reads natively.
 Not latent vectors. Not English prose. A universal memory compression dialect.
 
 Works with: Claude, ChatGPT, Gemini, Llama, Mistral -- any model that reads text.
@@ -550,7 +550,7 @@ class Dialect:
                       'room', 'date', etc.
 
         Returns:
-            AAAK-compressed string (~30x smaller than input)
+            AAAK-compressed string
         """
         metadata = metadata or {}
 

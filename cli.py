@@ -400,9 +400,8 @@ def cmd_setup(args, config) -> int:
     print()
 
     print("MemPalace is a local-first AI memory system with:")
-    print("  - 96.6% recall on LongMemEval benchmark")
     print("  - Palace structure (Wings/Rooms/Closets/Drawers)")
-    print("  - AAAK compression (30x lossless)")
+    print("  - AAAK compression")
     print("  - ChromaDB + SQLite (fully local)")
     print()
 

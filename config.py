@@ -1,7 +1,7 @@
 """
 MemPalace configuration system.
 
-Priority: env vars > config file (~/.mempalace/config.json) > defaults
+Priority: env vars > config file (>HERMES_HOME/.mempalace/config.json) > hermes_home default
 """
 
 import json
@@ -65,18 +65,24 @@ DEFAULT_HALL_KEYWORDS = {
 class MempalaceConfig:
     """Configuration manager for MemPalace.
 
-    Load order: env vars > config file > defaults.
+    Load order: env vars > config file > hermes_home default.
     """
 
-    def __init__(self, config_dir=None):
+    def __init__(self, config_dir=None, hermes_home=None):
         """Initialize config.
 
         Args:
             config_dir: Override config directory (useful for testing).
                         Defaults to ~/.mempalace.
+            hermes_home: Override hermes home directory.
+                        If not set, read from HERMES_HOME env var or ~/.hermes.
         """
+        self._hermes_home = (
+            Path(hermes_home).expanduser() if hermes_home
+            else Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+        )
         self._config_dir = (
-            Path(config_dir) if config_dir else Path(os.path.expanduser("~/.mempalace"))
+            Path(config_dir) if config_dir else self._hermes_home / ".mempalace"
         )
         self._config_file = self._config_dir / "config.json"
         self._people_map_file = self._config_dir / "people_map.json"
@@ -95,7 +101,11 @@ class MempalaceConfig:
         env_val = os.environ.get("MEMPALACE_PATH")
         if env_val:
             return env_val
-        return self._file_config.get("palace_path", DEFAULT_PALACE_PATH)
+        file_val = self._file_config.get("palace_path")
+        if file_val:
+            return file_val
+        # Derive from hermes_home: <hermes_home>/.mempalace/
+        return str(self._hermes_home / ".mempalace")
 
     @property
     def collection_name(self):
@@ -163,7 +173,7 @@ class MempalaceConfig:
         self._config_dir.mkdir(parents=True, exist_ok=True)
         if not self._config_file.exists():
             default_config = {
-                "palace_path": DEFAULT_PALACE_PATH,
+                "palace_path": str(self._hermes_home / ".mempalace"),
                 "collection_name": DEFAULT_COLLECTION_NAME,
                 "topic_wings": DEFAULT_TOPIC_WINGS,
                 "hall_keywords": DEFAULT_HALL_KEYWORDS,

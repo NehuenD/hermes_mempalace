@@ -1,6 +1,6 @@
 # MemPalace — Hermes Memory Provider Plugin
 
-Local-first AI memory system with palace structure (Wings → Rooms → Closets → Drawers), AAAK compression dialect, and ChromaDB-backed semantic search. 96.6% recall on LongMemEval benchmark.
+Local-first AI memory system with palace structure (Wings → Rooms → Closets → Drawers), AAAK compression dialect, and ChromaDB-backed semantic search.
 
 ## What It Is
 
@@ -192,7 +192,7 @@ mempalace_diary_write(
 
 ## The AAAK Compression Dialect
 
-AAAK (Autonomous Autonomous Autonomous Knowledge) is a 30x lossless shorthand for storing compressed knowledge in drawers. It keeps context loading fast without losing information.
+AAAK (Autonomous Autonomous Autonomous Knowledge) is a compact shorthand for storing compressed knowledge in drawers. It keeps context loading fast while preserving the key facts.
 
 ### Format
 

@@ -1,10 +1,28 @@
 """Tests for MemPalace Memory Provider Plugin."""
 
+import importlib.util
 import json
+import os
+import sys
+
 import pytest
 from unittest.mock import MagicMock, patch
 
-from plugins.mempalace import MempalaceMemoryProvider
+# The plugin is the repo-root package (there is no mempalace/ subdir after the
+# flatten refactor). Expose it under the name `mempalace` — regardless of what
+# the checkout directory is called — so `from mempalace import ...` works and
+# the tool-dispatch tests that patch `mempalace.mcp_server.*` resolve.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
+_spec = importlib.util.spec_from_file_location(
+    "mempalace", os.path.join(_REPO_ROOT, "__init__.py")
+)
+_mempalace = importlib.util.module_from_spec(_spec)
+_mempalace.__path__ = [_REPO_ROOT]  # resolve `from .tools_* import` siblings
+sys.modules["mempalace"] = _mempalace
+_spec.loader.exec_module(_mempalace)
+
+from mempalace import MempalaceMemoryProvider
 
 
 class FakeCollection:

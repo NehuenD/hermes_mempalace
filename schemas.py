@@ -118,7 +118,7 @@ GET_AAAK_SPEC_SCHEMA = {
     "name": "mempalace_get_aaak_spec",
     "description": (
         "Get the AAAK dialect specification — the compressed shorthand format. "
-        "AAAK is 30x lossless compression for fast context loading."
+        "AAAK is a compact shorthand for fast context loading."
     ),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }

@@ -1,7 +1,7 @@
 """MemPalace memory plugin — MemoryProvider interface.
 
 Local-first AI memory system with palace structure (Wings/Rooms/Closets/Drawers),
-AAAK compression dialect (30x lossless), and 96.6% recall on LongMemEval benchmark.
+and AAAK compression dialect.
 
 Config via environment variables or $HERMES_HOME/.mempalace/config.json:
     MEMPALACE_PATH        — Palace directory (default: ~/.mempalace/)
@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agent.memory_provider import MemoryProvider
+from agent.memory_provider import MemoryProvider, spawn_context_thread
 
 logger = logging.getLogger(__name__)
 
@@ -88,22 +88,23 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
         self._l0_identity: str = ""
         self._l1_story: str = ""
 
+    @property
     def name(self) -> str:
         return "mempalace"
     def is_available(self) -> bool:
         if self._available:
             return True
+        # Fail closed: a provider whose storage engine (ChromaDB) or config
+        # format (YAML) is missing must not be activated.
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from .config import MempalaceConfig
+            import chromadb
+            import yaml
 
             return True
         except ImportError:
-            logger.debug("MemPalace not installed: pip install mempalace")
+            logger.debug(
+                "MemPalace not available: chromadb or yaml not importable"
+            )
             return False
     def get_config_schema(self) -> List[Dict[str, Any]]:
         return [
@@ -135,7 +136,8 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
         existing.update(values)
         config_path.write_text(json.dumps(existing, indent=2))
     def initialize(self, session_id: str, **kwargs) -> None:
-        self._config = _load_config()
+        hermes_home = kwargs.get("hermes_home")
+        self._config = _load_config(hermes_home=hermes_home)
         self._palace_path = _get_palace_path(self._config)
         self._collection_name = self._config.get("collection_name", _DEFAULT_COLLECTION)
         self._default_wing = self._config.get("default_wing", _DEFAULT_WING)
@@ -143,19 +145,15 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
 
         try:
             import chromadb
-            import sys
 
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
-            from .knowledge_graph import KnowledgeGraph
-
+            _palace_path = self._palace_path / "palace"
             self._chroma_client = chromadb.PersistentClient(
-                path=str(self._palace_path / "palace")
+                path=str(_palace_path)
             )
             self._collection = self._chroma_client.get_or_create_collection(
                 self._collection_name
             )
+            from .knowledge_graph import KnowledgeGraph
             self._kg = KnowledgeGraph()
             self._available = True
             logger.info("MemPalace initialized at %s", self._palace_path)
@@ -181,11 +179,6 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
             return
 
         try:
-            import sys
-
-            _plugin_dir = Path(__file__).parent / "mempalace"
-            if str(_plugin_dir) not in sys.path:
-                sys.path.insert(0, str(_plugin_dir))
             from .layers import Layer0, Layer1
 
             palace_str = str(self._palace_path / "palace")
@@ -529,7 +522,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
             learnings_block = ""
 
         aaak_guide = """## AAAK Compression Dialect
-AAAK (Autonomous Autonomous Autonomous Knowledge) is a 30x lossless shorthand format.
+AAAK (Autonomous Autonomous Autonomous Knowledge) is a compact shorthand format.
 Use structured shorthand to store memories compactly:
 
 Format: ENTITY → entity|topic_codes|"key_quote"|flags
@@ -603,12 +596,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             if not self._ensure_palace():
                 return
             try:
-                import sys
-
-                _plugin_dir = Path(__file__).parent / "mempalace"
-                if str(_plugin_dir) not in sys.path:
-                    sys.path.insert(0, str(_plugin_dir))
-                from searcher import search_memories
+                from .searcher import search_memories
 
                 results = search_memories(
                     query,
@@ -622,8 +610,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             except Exception as e:
                 logger.debug("MemPalace prefetch failed: %s", e)
 
-        self._prefetch_thread = threading.Thread(
-            target=_run, daemon=True, name="mempalace-prefetch"
+        self._prefetch_thread = spawn_context_thread(
+            target=_run, name="mempalace-prefetch"
         )
         self._prefetch_thread.start()
     def sync_turn(
@@ -665,8 +653,8 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=2.0)
 
-        self._sync_thread = threading.Thread(
-            target=_mine, daemon=True, name="mempalace-sync"
+        self._sync_thread = spawn_context_thread(
+            target=_mine, name="mempalace-sync"
         )
         self._sync_thread.start()
 
@@ -1005,10 +993,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             except Exception as e:
                 logger.debug("Session end extraction failed: %s", e)
 
-        thread = threading.Thread(
-            target=_extract, daemon=True, name="mempalace-session-end"
+        spawn_context_thread(
+            target=_extract, name="mempalace-session-end"
         )
-        thread.start()
 
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
         if not messages or not self._ensure_palace():
@@ -1051,10 +1038,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             except Exception as e:
                 logger.debug("Failed to mirror memory write: %s", e)
 
-        thread = threading.Thread(
-            target=_mirror, daemon=True, name="mempalace-memory-write"
-        )
-        thread.start()
+        spawn_context_thread(
+            target=_mirror, name="mempalace-memory-write"
+        ).start()
 
     def on_delegation(
         self, task: str, result: str, *, child_session_id: str = "", **kwargs
@@ -1083,10 +1069,9 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
             except Exception as e:
                 logger.debug("Failed to record delegation: %s", e)
 
-        thread = threading.Thread(
-            target=_record, daemon=True, name="mempalace-delegation"
-        )
-        thread.start()
+        spawn_context_thread(
+            target=_record, name="mempalace-delegation"
+        ).start()
 
     def shutdown(self) -> None:
         for t in (self._prefetch_thread, self._sync_thread):

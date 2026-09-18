@@ -22,12 +22,15 @@ _DEFAULT_TTL_DAYS = 90
 # ---------------------------------------------------------------------------
 
 
-def load_config() -> dict:
+def load_config(hermes_home=None) -> dict:
     """Load config from env vars with $HERMES_HOME/.mempalace/config.json overrides.
 
     Also supports multi-profile via memory.profiles in hermes config.yaml.
     """
     from hermes_constants import get_hermes_home
+
+    if hermes_home is None:
+        hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
 
     config = {
         "palace_path": os.environ.get("MEMPALACE_PATH", _DEFAULT_PALACE_PATH),
@@ -44,10 +47,10 @@ def load_config() -> dict:
                 "max_age_days": 90,
                 "max_merges_per_cycle": 5,
             },
-        },
+        }
     }
 
-    config_path = get_hermes_home() / ".mempalace" / "config.json"
+    config_path = Path(hermes_home) / ".mempalace" / "config.json"
     if config_path.exists():
         try:
             file_cfg = json_lib.loads(config_path.read_text(encoding="utf-8"))
@@ -60,7 +63,7 @@ def load_config() -> dict:
     try:
         import yaml
 
-        hermes_config_path = get_hermes_home() / "config.yaml"
+        hermes_config_path = Path(hermes_home) / "config.yaml"
         if hermes_config_path.exists():
             hermes_cfg = yaml.safe_load(hermes_config_path.read_text()) or {}
             mem_cfg = hermes_cfg.get("memory", {})

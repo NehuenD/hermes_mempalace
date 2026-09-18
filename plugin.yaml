@@ -1,6 +1,6 @@
 name: mempalace
 version: 1.0.0
-description: "MemPalace — local-first AI memory with palace structure (Wings/Rooms/Closets/Drawers), AAAK compression, and 96.6% recall."
+description: "MemPalace — local-first AI memory with palace structure (Wings/Rooms/Closets/Drawers) and AAAK compression."
 pip_dependencies:
   - chromadb>=0.4.0
   - pyyaml>=6.0
