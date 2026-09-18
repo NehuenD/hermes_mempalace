@@ -339,7 +339,7 @@ REMEMBER_FACT_SCHEMA = {
     "name": "mempalace_remember_fact",
     "description": (
         "Add a fact to the knowledge graph using natural language. "
-        "Parses sentences like 'Nehuen lives in Argentina' into (subject, predicate, object). "
+        "Parses sentences like 'Alex lives in Argentina' into (subject, predicate, object). "
         "Supports patterns: 'X is a Y', 'X has Y', 'X lives in Y', 'X works as Y', etc."
     ),
     "parameters": {
@@ -347,7 +347,7 @@ REMEMBER_FACT_SCHEMA = {
         "properties": {
             "fact": {
                 "type": "string",
-                "description": "A fact in natural language, e.g., 'Nehuen lives in Argentina' or 'Python is a programming language'.",
+                "description": "A fact in natural language, e.g., 'Alex lives in Argentina' or 'Python is a programming language'.",
             },
             "valid_from": {
                 "type": "string",
@@ -718,7 +718,7 @@ RECALL_SCHEMA = {
             },
             "subject": {
                 "type": "string",
-                "description": "Filter by subject entity (e.g. 'Nehuen', 'T3Code').",
+                "description": "Filter by subject entity (e.g. 'Alex', 'Acme').",
             },
             "closet": {
                 "type": "string",
@@ -803,7 +803,7 @@ LEARN_SCHEMA = {
             },
             "subject": {
                 "type": "string",
-                "description": "Subject entity (e.g. 'Nehuen', 'Collatz').",
+                "description": "Subject entity (e.g. 'Alex', 'Collatz').",
             },
             "predicate": {
                 "type": "string",

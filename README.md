@@ -1,423 +1,109 @@
 # MemPalace — Hermes Memory Provider Plugin
 
-Local-first AI memory system with palace structure (Wings → Rooms → Closets → Drawers), AAAK compression dialect, and ChromaDB-backed semantic search.
+Local-first persistent memory for Hermes. MemPalace layers a ChromaDB vector store (semantic search) with a SQLite knowledge graph (structured facts) and organizes memories by a palace taxonomy: **Wing → Room → Closet → Drawer**. An optional shorthand dialect (**AAAK**) keeps dense entries compact.
 
-## What It Is
+All storage is local. No accounts, no network calls for core operation.
 
-MemPalace is a **long-term memory layer** for the Hermes AI agent. It sits on top of ChromaDB (vector store) and SQLite (knowledge graph) to give the agent persistent, searchable memory across sessions.
+## The palace metaphor
 
-The core idea: memories are **spatial** and **semantic**. You navigate them like a building (wings → rooms → closets → drawers), and you find them by meaning, not just keywords.
-
----
-
-## The Palace Metaphor
-
-Think of your memory as a building:
-
-| Level | What It Represents | Example |
-|-------|-------------------|---------|
-| **Wing** | Domain or agent | `wing_myos`, `wing_general` |
+| Level | Meaning | Example |
+|-------|---------|---------|
+| **Wing** | High-level domain | `wing_general` (default, configurable) |
 | **Room** | Topic or activity | `learnings`, `sessions`, `preferences` |
 | **Closet** | Content classification | `personal`, `projects`, `world` |
-| **Drawer** | Individual memory entry | A single fact, preference, or note |
+| **Drawer** | One memory entry | a fact, preference, or note (UUID, content, metadata, TTL) |
 
-Every drawer has:
-- A unique **UUID**
-- **Content** (the actual memory text or AAAK shorthand)
-- **Metadata** — subject, closet, category, flags, timestamps
-- **Embedding** — ChromaDB computes this automatically for semantic search
-- **parent_id** — links to previous versions for versioning chains
-- **TTL / expires_at** — optional expiry for transient memories
+## Install & Enable
 
----
+1. Dependencies: `chromadb` and `pyyaml` (declared in `plugin.yaml`).
+2. Place the plugin at `~/.hermes/plugins/mempalace/` (or under a named profile's plugins dir), or install from a git URL with `hermes plugins install <git-url>`.
+3. Select it as the active memory provider:
 
-## The Learning Framework
+   ```bash
+   hermes config set memory.provider mempalace
+   ```
 
-The learning framework is the core API for filing, retrieving, and updating knowledge. It has three primary tools:
+When active, its 45 tools appear alongside Hermes's built-ins and the CLI below is wired automatically. **Installed ≠ enabled**: nothing runs until `memory.provider` names it. Only one external memory provider can be active at a time.
 
-### 1. File — `mempalace_learn`
+## Quick tour
 
-Store new knowledge in the palace. The key feature is **recall-before-filing**: before storing, it runs a broad semantic search to check if you already know something similar. If a duplicate exists, it returns that instead of filing redundant content.
+### Remember
+
+```python
+mempalace_remember(content="Alex prefers dark mode in all terminals", category="preference")
+```
+
+Auto-detects subject, room, and closet, files the drawer, and embeds it for semantic search.
+
+### Recall
+
+```python
+mempalace_recall(query="terminal color preference", closet="personal", limit=3)
+```
+
+Semantic search across drawers, ranked by similarity, with subject/closet/category/flags filters and pagination. Each recall updates `last_accessed`, which feeds the `accessed` sort mode.
+
+### Learn (recall-before-filing)
 
 ```python
 mempalace_learn(
-    content="Nehuen prefers using Postgres for database work because it is more reliable",
-    title="Nehuen's database preference",
-    subject="Nehuen",
+    content="Alex prefers Postgres for database work because it is more reliable",
+    title="Alex's database preference",
+    subject="Alex",
     predicate="prefers",
     category="preference",
-    closet="personal",      # personal | projects | world
-    auto_detect=True,       # default — runs duplicate check first
-)
-```
-
-Returns:
-```json
-{
-  "drawer_id": "c1b967c2-4acc-4980-88de-2e0dd04fe298",
-  "title": "Nehuen's database preference",
-  "subject": "Nehuen",
-  "closet": "personal",
-  "category": "preference",
-  "stored": true
-}
-```
-
-The drawer is stored in the `learnings` room under `wing_myos`, embedded and ready for semantic search.
-
-### 2. Retrieve — `mempalace_recall`
-
-Semantic search across all drawers. You can filter by subject, closet, category, or flags. Results are ranked by similarity.
-
-```python
-mempalace_recall(
-    query="what database does Nehuen like",
     closet="personal",
-    limit=3,
+    auto_detect=True,   # runs a duplicate check first
 )
 ```
 
-Returns:
-```json
-{
-  "results": [
-    {
-      "id": "c1b967c2-4acc-4980-88de-2e0dd04fe298",
-      "content": "Nehuen prefers using Postgres for database work because it is more reliable",
-      "subject": "Nehuen",
-      "closet": "personal",
-      "category": "preference",
-      "similarity_score": 0.812,
-      "created_at": "2026-04-29T21:03:56+00:00",
-      "last_accessed": "2026-04-30T01:17:50+00:00"
-    }
-  ],
-  "count": 1,
-  "total": 1
-}
-```
+If a near-duplicate exists, returns it instead of filing redundant content. Updates create a new version linked by `parent_id` — retrieve the chain with `mempalace_get_versions`.
 
-Each recall updates the `last_accessed` timestamp on matched drawers — this feeds the "accessed" sort mode.
-
-### 3. Update — `mempalace_update`
-
-Modify an existing drawer. Supports three modes:
+### Cross-session project tracking
 
 ```python
-# Fix something wrong
-mempalace_update(
-    drawer_id="c1b967c2-4acc-4980-88de-2e0dd04fe298",
-    mode="correct",
-    content="...correction text...",
-)
-
-# Extend with new context (appends, doesn't overwrite)
-mempalace_update(
-    drawer_id="c1b967c2-4acc-4980-88de-2e0dd04fe298",
-    mode="extend",
-    extend_with="He also uses SQLite for small projects.",
-)
-
-# Replace entirely
-mempalace_update(
-    drawer_id="c1b967c2-4acc-4980-88de-2e0dd04fe298",
-    mode="replace",
-    content="New full content",
-)
-```
-
-Every update creates a **new version** linked by `parent_id`. You can retrieve the full version chain with `mempalace_get_versions(drawer_id="...")`.
-
----
-
-## Convenience Tools
-
-### `mempalace_remember` — Natural Language Filing
-
-The simplest interface. Just say what you want to remember:
-
-```
-mempalace_remember(content="Nehuen works out every morning")
-mempalace_remember(content="T3Code uses Next.js 15 on port 3000", category="fact")
-```
-
-It auto-detects the subject, closet, and category, then files it into the right room.
-
-### `mempalace_recall_all` — Bulk Context Load
-
-Fetch all memories at once — useful at session start to restore context:
-
-```
-mempalace_recall_all(cap=20, closet="personal", sort="recent")
-```
-
-Supports closet filtering and three sort modes: `recent` (created_at), `accessed` (last_accessed), `relevance`.
-
----
-
-## Session & Diary Tools
-
-### Cross-Session Project Tracking
-
-When you finish a working session, file what happened:
-
-```
+# End of session
 mempalace_session_write(
-    project="recipe-api:rest-v2",
-    summary="Migrated ingredients endpoint to GraphQL. Resolved N+1 query on /recipes/:id. Added cursor pagination.",
-    next="Update /search endpoint. Write migration docs. Deploy to staging."
+    project="acme-api:v2",
+    summary="Migrated the ingredients endpoint to GraphQL; fixed the N+1 query on /recipes/:id; added cursor pagination.",
+    next="Update /search. Write migration docs. Deploy to staging.",
 )
+
+# Next session — restore context
+mempalace_session_read(project="acme-api", last_n=5)
 ```
 
-Next session, restore context:
+The startup context block auto-injects the most recent sessions and learnings.
 
-```
-mempalace_session_read(project="recipe-api", last_n=5)
-```
-
-The system prompt auto-injects the 5 most recent sessions at startup — no manual tracking needed.
-
-### Agent Diary
-
-Each agent (e.g. `reviewer`, `architect`) maintains its own diary in AAAK shorthand:
-
-```
-mempalace_diary_write(
-    agent="architect",
-    entry="SESSION → 2026-04-29|design|chose Postgres over SQLite|next: migration script"
-)
-```
-
----
-
-## The AAAK Compression Dialect
-
-AAAK (Autonomous Autonomous Autonomous Knowledge) is a compact shorthand for storing compressed knowledge in drawers. It keeps context loading fast while preserving the key facts.
-
-### Format
-
-```
-ENTITY → codes|topic|"key_quote"|flags
-```
-
-- **codes** — comma-separated tags (language, framework, domain)
-- **topic** — short topic descriptor
-- **"key_quote"** — verbatim phrase worth preserving
-- **flags** — DECISION, CORE, TECHNICAL, SENSITIVE, PIVOT
-
-### Examples
-
-```
-NEHUEN → workout,daily|pref_exercise|streak:7days|DECISION
-AUTH_DB → Postgres|db,migration|reason:reliable|DECISION
-MYSQL → MySQL8,production|db,legacy|reason:maturity|PROJECT
-RECIPE_APP → recipe,api|stack|Node+Postgres|FACT
-```
-
-### When to Use AAAK
-
-Use AAAK for:
-- Session summaries (file at end of each session)
-- Cross-session project status (what we did, what's next)
-- Compressed facts with multiple dimensions (language + preference + reason)
-- Recurring patterns (Mistakes registry entries)
-
-Use **full text** for:
-- Verbatim quotes worth preserving exactly
-- Complex decisions with nuanced reasoning
-- First-time discoveries with full context
-
-Preview compression before saving:
-
-```
-mempalace_preview_aaak(content="Nehuen prefers Postgres for database work because...")
-# Returns: "NEHUEN → Postgres,db|pref|reason:reliable|DECISION"
-```
-
----
-
-## Knowledge Graph
-
-Beyond vector search, MemPalace has a **structured knowledge graph** backed by SQLite. Use it for explicit relationships:
+### Knowledge graph
 
 ```python
-# Store a fact triple
-mempalace_kg_add(
-    subject="Nehuen",
-    predicate="lives_in",
-    object="Buenos Aires",
-    valid_from="2026-04-01",
-)
-
-# Query all relationships for an entity
-mempalace_kg_query(entity="Nehuen")
-
-# Explore outward from an entity
-mempalace_kg_explore(entity="Nehuen", depth=2, direction="out")
+mempalace_kg_add(subject="Alex", predicate="lives_in", object="Montevideo", valid_from="2026-04-01")
+mempalace_kg_query(entity="Alex")
+mempalace_kg_explore(entity="Alex", depth=2, direction="out")
 ```
 
----
+Facts are triples with temporal validity; query, timeline, invalidate, and traverse them.
 
-## Workflow Examples
+## AAAK dialect
 
-### Remembering a User Preference
-
-```
-User: Remember that I prefer dark mode in all my terminals
-
-Assistant:
-mempalace_remember(content="Nehuen prefers dark mode in all terminals", category="preference")
-# → filed in wing_myos / learnings / personal
-```
-
-### Project Session Tracking
+AAAK (Autonomous Autonomous Autonomous Knowledge) is a compact shorthand for dense memories — ideal for session summaries, compressed facts, and recurring patterns. Use full text for verbatim quotes and nuanced decisions.
 
 ```
-# End of session:
-mempalace_session_write(
-    project="recipe-api:rest-v2",
-    summary="Migrated ingredients endpoint to GraphQL. Resolved N+1 query on /recipes/:id. Added cursor pagination.",
-    next="Update /search endpoint. Write migration docs. Deploy to staging."
-)
+Format: ENTITY → codes|topic|"key_quote"|flags
 
-# Next session — start fresh:
-mempalace_session_read(project="recipe-api", last_n=3)
-# → system_prompt_block auto-injects 5 recent sessions at startup
+Example: AUTH_DB → Postgres|db,migration|reason:reliable|decision
+Example: USER → pref:dark.mode|workflow|preference
+Example: APP → project,api|architecture,goals|project
 ```
 
-### Finding a Past Decision
+Flags: `DECISION, CORE, SENSITIVE, TECHNICAL, PIVOT`. Preview before saving with `mempalace_preview_aaak`.
 
-```
-mempalace_recall(
-    query="why did we choose Postgres over SQLite",
-    closet="personal",
-    category="decision",
-    limit=5,
-)
-```
+## Mistakes
 
-### Recording a Mistake
+Record, recall, and distill mistakes into learnings:
 
-```
-mempalace_record_mistake(
-    content="ChromaDB compound filter {\"wing\": \"x\", \"room\": \"y\"} is invalid — must use $and operator",
-    domain="hermes",
-    error_type="runtime",
-    severity="HIGH",
-)
-```
-
-Next time you touch ChromaDB filters, check the mistakes registry first:
-
-```
-mempalace_recall_mistakes(domain="hermes")
-```
-
----
-
-## Architecture
-
-```
-~/.mempalace/
-├── palace/                  # ChromaDB vector store (embeddings + metadata)
-│   └── mempalace_drawers   # Collection of all drawer documents
-├── knowledge_graph.db       # SQLite KG (triples, timelines)
-├── config.json              # Palace config
-└── identity.txt             # L0 identity layer
-```
-
-### ChromaDB vs SQLite
-
-| Use ChromaDB (vector) | Use SQLite KG |
-|----------------------|---------------|
-| Semantic search | Explicit relationships |
-| Natural language recall | Fact triples with temporal validity |
-| Similarity matching | Timelines, exploration |
-| Unstructured content | Structured, linkable entities |
-
----
-
-## Requirements
-
-- Python 3.9+
-- `chromadb`
-- `pyyaml`
-
-## Quick Start
-
-```bash
-# Initialize palace
-hermes mempalace init ~/.mempalace/
-
-# Check status
-hermes mempalace status
-
-# Mine data
-hermes mempalace mine ~/projects/myapp
-```
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `hermes mempalace setup` | Interactive setup |
-| `hermes mempalace status` | Palace overview |
-| `hermes mempalace init <dir>` | Initialize palace |
-| `hermes mempalace mine <dir>` | Mine data |
-| `hermes mempalace memories` | List memories |
-| `hermes mempalace wings` | List wings and rooms |
-| `hermes mempalace enable` | Enable plugin |
-| `hermes mempalace disable` | Disable plugin |
-
----
-
-## Tools (43 total)
-
-### Read
-- `mempalace_status` — Palace overview + drawer count
-- `mempalace_list_wings` — List wings with counts
-- `mempalace_list_rooms` — List rooms in a wing
-- `mempalace_get_taxonomy` — Full hierarchy tree
-- `mempalace_search` — Semantic search with filters
-- `mempalace_recall` — Semantic recall with pagination
-- `mempalace_recall_all` — List all drawers
-- `mempalace_check_duplicate` — Check for duplicates
-- `mempalace_get_aaak_spec` — AAAK dialect reference
-
-### Write
-- `mempalace_add_drawer` — Store verbatim content
-- `mempalace_remember` — Remember with auto-room detection
-- `mempalace_remember_fact` — Add KG fact via natural language
-- `mempalace_delete_drawer` — Remove by ID
-- `mempalace_set_drawer_flags` — Tag drawers
-- `mempalace_preview_aaak` — Preview compression
-
-### Knowledge Graph
-- `mempalace_kg_query` — Query entity relationships
-- `mempalace_kg_add` — Add fact triple
-- `mempalace_kg_invalidate` — Mark fact as ended
-- `mempalace_kg_timeline` — Entity timeline
-- `mempalace_kg_stats` — Graph stats
-- `mempalace_kg_explore` — Directional traversal
-
-### Session & Diary
-- `mempalace_session_write` — Write session entry
-- `mempalace_session_read` — Read sessions
-- `mempalace_session_diff` — Compare sessions
-- `mempalace_diary_write` — Write diary
-- `mempalace_diary_read` — Read diary
-
-### Navigation
-- `mempalace_traverse` — Walk graph across wings
-- `mempalace_find_tunnels` — Find rooms bridging wings
-- `mempalace_graph_stats` — Connectivity stats
-
-### Mistakes
-
-MemPalace tracks mistakes to prevent repeating them. Record, recall, and distill mistakes into learnings:
-
-```
-# Record a mistake
+```python
 mempalace_record_mistake(
     content="ChromaDB compound filter with two top-level operators crashes — must use $and",
     domain="hermes",
@@ -428,21 +114,58 @@ mempalace_record_mistake(
 # Recall mistakes via semantic search (category="mistake")
 mempalace_recall(query="ChromaDB filter bugs", category="mistake")
 
-# Distill a mistake into an actionable lesson (files in wing_mistakes + optional closet)
-mempalace_distill_mistake(
-    drawer_id="...",       # the mistake drawer to distill
-    closet="projects",     # optionally file the lesson in projects/personal too
-)
+# Distill into an actionable lesson (parent_id links back to the mistake)
+mempalace_distill_mistake(drawer_id="...", closet="projects")
 ```
 
-Distill runs a structured analysis — root cause, counterfactual, actionable lesson, related concepts, and improvement score. The lesson is stored with a `parent_id` link back to the original mistake, so you can trace the full history.
+## Configuration
 
-### Utilities
-- `mempalace_summarize` — Palace summary
-- `mempalace_watch` — Monitor changes
-- `mempalace_expiring` — Expiring drawers
-- `mempalace_noise_filter` — Manage noise patterns
-- `mempalace_backup` — Export to JSON
-- `mempalace_restore` — Restore from backup
-- `mempalace_profile_list` — List profiles
-- `mempalace_profile_switch` — Switch profile
+Priority: **environment variables > config file > defaults**.
+
+- Palace directory (default: `$HERMES_HOME/.mempalace/`; ChromaDB data under `<palace>/palace`, KG at `<palace>/knowledge_graph.db`)
+- Config file: `$HERMES_HOME/.mempalace/config.json` — `palace_path`, `collection_name`, `default_wing`, `user_entity` (KG subject used when seeding identity facts; default `USER`)
+- Environment overrides:
+
+| Variable | Meaning |
+|----------|---------|
+| `MEMPALACE_PATH` | Palace directory (highest priority) |
+| `MEMPALACE_COLLECTION` | ChromaDB collection name |
+| `MEMPALACE_DEFAULT_WING` | Default wing |
+| `MEMPALACE_REFERER` | Optional OpenRouter referer for the LLM judge |
+
+## CLI
+
+When MemPalace is the active provider, Hermes wires the CLI automatically:
+
+```bash
+hermes mempalace setup         # interactive setup
+hermes mempalace status        # palace overview
+hermes mempalace init <dir>    # initialize a palace
+hermes mempalace mine <dir>    # mine data into the palace
+hermes mempalace memories      # list stored memories
+hermes mempalace wings         # list wings and rooms
+hermes mempalace summarize     # palace summary
+hermes mempalace enable|disable
+hermes mempalace profile list|create|switch|delete
+```
+
+## Tool index (45)
+
+| Group | Tools |
+|-------|-------|
+| **Read & search** | `mempalace_status`, `mempalace_list_wings`, `mempalace_list_rooms`, `mempalace_get_taxonomy`, `mempalace_search`, `mempalace_recall`, `mempalace_recall_all`, `mempalace_check_duplicate`, `mempalace_get_aaak_spec`, `mempalace_drawer_history`, `mempalace_get_versions`, `mempalace_review` |
+| **Write** | `mempalace_add_drawer`, `mempalace_remember`, `mempalace_remember_fact`, `mempalace_learn`, `mempalace_update`, `mempalace_delete_drawer`, `mempalace_set_drawer_flags`, `mempalace_preview_aaak` |
+| **Knowledge graph** | `mempalace_kg_query`, `mempalace_kg_add`, `mempalace_kg_invalidate`, `mempalace_kg_timeline`, `mempalace_kg_stats`, `mempalace_kg_explore` |
+| **Session & diary** | `mempalace_session_write`, `mempalace_session_read`, `mempalace_session_diff`, `mempalace_diary_write`, `mempalace_diary_read` |
+| **Navigation** | `mempalace_traverse`, `mempalace_find_tunnels`, `mempalace_graph_stats` |
+| **Mistakes** | `mempalace_record_mistake`, `mempalace_distill_mistake` |
+| **Maintenance** | `mempalace_summarize`, `mempalace_watch`, `mempalace_expiring`, `mempalace_noise_filter`, `mempalace_backup`, `mempalace_restore`, `mempalace_sweep`, `mempalace_profile_list`, `mempalace_profile_switch` |
+
+## Development
+
+- Tests: `tests/test_mempalace_provider.py` — pure-logic and tool-dispatch tests that run without a live ChromaDB.
+- Layout is flat: `__init__.py` (provider + lifecycle) with tool mixins (`tools_*.py`), `schemas.py` (all tool schemas), `layers.py` (wake-up context layers), `dialect.py` (AAAK), `strategy_system.py` / `llm_judge.py` / `consolidation.py` / `extraction.py` (ReasoningBank), `searcher.py` / `retrieval.py` (search), `knowledge_graph.py` / `entity_detector.py` / `entity_registry.py` / `palace_graph.py` (structured layer), `client.py` / `cli.py` / `mcp_server.py` (standalone surface).
+
+## License
+
+MIT

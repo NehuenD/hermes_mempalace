@@ -198,9 +198,12 @@ def build_llm_call_fn(
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            # Add OpenRouter-specific headers if using OpenRouter
+            # Add OpenRouter-specific headers if using OpenRouter.
+            # The referer is optional and configurable (never assume an author repo).
             if "openrouter" in (base_url or ""):
-                headers["HTTP-Referer"] = "https://github.com/NehuenD/hermes_mempalace"
+                referer = os.environ.get("MEMPALACE_REFERER", "")
+                if referer:
+                    headers["HTTP-Referer"] = referer
                 headers["X-Title"] = "MemPalace ReasoningBank"
                 effective_model = _openrouter_model(model_name)
             else:

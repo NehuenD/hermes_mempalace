@@ -71,9 +71,14 @@ class TestMempalaceProvider:
     def test_get_config_schema(self):
         provider = MempalaceMemoryProvider()
         schema = provider.get_config_schema()
-        assert len(schema) == 3
+        assert len(schema) == 4
         keys = {s["key"] for s in schema}
-        assert keys == {"palace_path", "collection_name", "default_wing"}
+        assert keys == {
+            "palace_path",
+            "collection_name",
+            "default_wing",
+            "user_entity",
+        }
 
     def test_get_tool_schemas(self):
         provider = MempalaceMemoryProvider()

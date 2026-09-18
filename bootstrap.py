@@ -39,7 +39,7 @@ def ensure_local_imports() -> None:
 def purge_pypi_mempalace() -> None:
     """Remove a PyPI-installed 'mempalace' from sys.modules if one is cached.
 
-    Only needed when a standalone script (cli.py, client.py, kg_seed.py) runs
+    Only needed when a standalone script (cli.py, client.py) runs
     in an environment where a pip package might shadow the local plugin.
     """
     if "mempalace" not in sys.modules:

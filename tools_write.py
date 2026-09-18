@@ -111,7 +111,7 @@ class WriteToolsMixin:
                 aaak_entry += f"|next:{next_task}"
 
             metadata = {
-                "wing": "wing_myos",
+                "wing": self._default_wing,
                 "room": "sessions",
                 "closet": "hall_events",
                 "session_date": date,
@@ -125,7 +125,7 @@ class WriteToolsMixin:
                 metadatas=[metadata],
                 ids=[doc_id],
             )
-            self._update_taxonomy_cache("wing_myos", "sessions", 1)
+            self._update_taxonomy_cache(self._default_wing, "sessions", 1)
 
             return json.dumps(
                 {
@@ -147,7 +147,7 @@ class WriteToolsMixin:
             project = args.get("project", "")
             last_n = args.get("last_n", 5)
 
-            where_filter = {"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]}
+            where_filter = {"$and": [{"wing": self._default_wing}, {"room": "sessions"}]}
             if project:
                 where_filter["$and"].append({"session_project": project})
 
@@ -372,7 +372,7 @@ class WriteToolsMixin:
                 formatted_content = f"{entity_code} → {domain}|mistake|{content}|error_type:{error_type},severity:{severity}"
                 content_to_store = formatted_content
             else:
-                wing = "wing_myos"
+                wing = self._default_wing
                 room = "learnings"
                 closet = args.get("closet", "personal")
                 content_to_store = content

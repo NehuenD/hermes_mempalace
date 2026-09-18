@@ -729,7 +729,7 @@ class MetaToolsMixin:
             forget_filter = args.get("forget_filter", True)
             new_filter = args.get("new_filter", True)
 
-            forget_conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
+            forget_conditions = [{"wing": self._default_wing}, {"room": "sessions"}]
             if forget_filter and project:
                 forget_conditions.append({"session_project": project})
             if forget_filter and before_date:
@@ -742,7 +742,7 @@ class MetaToolsMixin:
                 else forget_conditions[0]
             )
 
-            new_conditions = [{"wing": "wing_myos"}, {"room": "sessions"}]
+            new_conditions = [{"wing": self._default_wing}, {"room": "sessions"}]
             if new_filter and project:
                 new_conditions.append({"session_project": project})
             if new_filter and before_date:

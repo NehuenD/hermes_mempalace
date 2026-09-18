@@ -4,19 +4,14 @@ Local-first AI memory system with palace structure (Wings/Rooms/Closets/Drawers)
 and AAAK compression dialect.
 
 Config via environment variables or $HERMES_HOME/.mempalace/config.json:
-    MEMPALACE_PATH        — Palace directory (default: ~/.mempalace/)
+    MEMPALACE_PATH        — Palace directory (default: $HERMES_HOME/.mempalace/)
     MEMPALACE_COLLECTION  — ChromaDB collection name (default: mempalace_drawers)
     MEMPALACE_DEFAULT_WING — Default wing (default: wing_general)
 
 Or via $HERMES_HOME/.mempalace/config.json.
 
-Tools (19 total):
-    READ:       status, list_wings, list_rooms, get_taxonomy, search,
-                check_duplicate, get_aaak_spec
-    WRITE:      add_drawer, delete_drawer
-    KNOWLEDGE G: kg_query, kg_add, kg_invalidate, kg_timeline, kg_stats
-    NAVIGATION: traverse, find_tunnels, graph_stats
-    DIARY:      diary_write, diary_read
+Tools (45 total — see schemas.py): read/write, knowledge-graph, session & diary,
+navigation, mistake, and maintenance families.
 """
 
 from __future__ import annotations
@@ -123,6 +118,11 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
                 "description": "Default wing name",
                 "default": _DEFAULT_WING,
             },
+            {
+                "key": "user_entity",
+                "description": "Entity code used as the KG subject for seeded identity facts",
+                "default": "USER",
+            },
         ]
     def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
         config_path = Path(hermes_home) / ".mempalace" / "config.json"
@@ -212,7 +212,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
 
         try:
             results = self._collection.get(
-                where={"$and": [{"wing": "wing_myos"}, {"room": "sessions"}]},
+                where={"$and": [{"wing": self._default_wing}, {"room": "sessions"}]},
                 include=["documents"],
             )
 
@@ -326,7 +326,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
 
             try:
                 existing = self._collection.get(
-                    where={"$and": [{"wing": "wing_myos"}, {"room": "diary"}]},
+                    where={"$and": [{"wing": self._default_wing}, {"room": "diary"}]},
                     include=["metadatas"],
                 )
                 if not existing.get("ids"):
@@ -336,7 +336,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
                         documents=["[diary room bootstrap]"],
                         metadatas=[
                             {
-                                "wing": "wing_myos",
+                                "wing": self._default_wing,
                                 "room": "diary",
                                 "closet": "system",
                             }
@@ -346,10 +346,10 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
             except Exception:
                 pass
 
-            # Bootstrap learnings room in wing_myos if not exists
+            # Bootstrap learnings room in default wing if not exists
             try:
                 existing_learnings = self._collection.get(
-                    where={"$and": [{"wing": "wing_myos"}, {"room": "learnings"}]},
+                    where={"$and": [{"wing": self._default_wing}, {"room": "learnings"}]},
                     include=["metadatas"],
                 )
                 if not existing_learnings.get("ids"):
@@ -359,7 +359,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
                         documents=["[learnings room bootstrap]"],
                         metadatas=[
                             {
-                                "wing": "wing_myos",
+                                "wing": self._default_wing,
                                 "room": "learnings",
                                 "closet": "system",
                             }
@@ -427,9 +427,11 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
         if not self._kg or not self._palace_path:
             return
         try:
-            hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
-            soul_path = Path(hermes_home) / "SOUL.md"
-            registry_path = Path.home() / ".mempalace" / "entity_registry.json"
+            # User entity code used as the KG subject for seeded identity facts.
+            # Configurable so the seed never bakes an author-specific identity
+            # into another user's knowledge graph.
+            user_entity = (self._config or {}).get("user_entity", "USER")
+            registry_path = self._palace_path.parent / "entity_registry.json"
 
             # Check if KG already has content
             kg_stats = self._kg.stats()
@@ -439,29 +441,6 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
 
             now = datetime.now().isoformat()
             count = 0
-
-            # Seed from SOUL.md
-            if soul_path.exists():
-                facts = [
-                    ("NEH", "core_value", "genuine_helpful", now),
-                    ("NEH", "core_value", "have_opinions", now),
-                    ("NEH", "core_value", "resourceful", now),
-                    ("NEH", "core_value", "earn_trust", now),
-                    ("NEH", "core_value", "remember_guest", now),
-                ]
-                for kw in ["private", "ask_before", "careful"]:
-                    facts.append(("NEH", "boundary", kw, now))
-                for kw in ["concise", "thorough"]:
-                    facts.append(("NEH", "vibe", kw, now))
-
-                for subject, predicate, obj, valid_from in facts:
-                    try:
-                        self._kg.add_triple(
-                            subject, predicate, obj, valid_from=valid_from
-                        )
-                        count += 1
-                    except Exception:
-                        pass
 
             # Seed from identity.txt
             identity_path = self._palace_path / "identity.txt"
@@ -478,7 +457,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
                             fact = line[2:].strip()
                             if fact and len(fact) > 3:
                                 self._kg.add_triple(
-                                    "MyOS",
+                                    user_entity,
                                     in_section.replace(" ", "_"),
                                     fact[:100],
                                     valid_from=now,
@@ -498,7 +477,7 @@ class MempalaceMemoryProvider(ReadToolsMixin, WriteToolsMixin, KnowledgeMixin, N
                         rel = data.get("relationship", "")
                         if rel:
                             self._kg.add_triple(
-                                "NEH",
+                                user_entity,
                                 "relationship",
                                 f"{entity_code}:{rel}",
                                 valid_from=now,
@@ -527,8 +506,8 @@ Use structured shorthand to store memories compactly:
 
 Format: ENTITY → entity|topic_codes|"key_quote"|flags
 Example: AUTH_DB → Postgres|db,migration|reason:reliable|decision
-Example: KAI → pref:detailed.reviews|team|preference
-Example: ORION → project,jovovich|architecture,goals|project
+Example: USER → pref:dark.mode|workflow|preference
+Example: APP → project,api|architecture,goals|project
 
 FLAGS: DECISION, CORE, SENSITIVE, TECHNICAL, PIVOT
 
@@ -872,7 +851,7 @@ when content exceeds 100 words. Store raw text for short items, AAAK for long su
                             documents=[diary_entry],
                             metadatas=[
                                 {
-                                    "wing": "wing_myos",
+                                    "wing": self._default_wing,
                                     "room": "diary",
                                     "closet": "hall_events",
                                     "created_at": now.isoformat(),
