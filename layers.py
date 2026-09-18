@@ -21,8 +21,6 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-import chromadb
-
 from .config import MempalaceConfig
 
 
@@ -91,6 +89,8 @@ class Layer1:
     def generate(self) -> str:
         """Pull top drawers from ChromaDB and format as compact L1 text."""
         try:
+            import chromadb
+
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
@@ -187,6 +187,8 @@ class Layer2:
     def retrieve(self, wing: str = None, room: str = None, n_results: int = 10) -> str:
         """Retrieve drawers filtered by wing and/or room."""
         try:
+            import chromadb
+
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
@@ -251,6 +253,8 @@ class Layer3:
     def search(self, query: str, wing: str = None, room: str = None, n_results: int = 5) -> str:
         """Semantic search, returns compact result text."""
         try:
+            import chromadb
+
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
@@ -307,6 +311,8 @@ class Layer3:
     ) -> list:
         """Return raw dicts instead of formatted text."""
         try:
+            import chromadb
+
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
         except Exception:
@@ -428,6 +434,8 @@ class MemoryStack:
 
         # Count drawers
         try:
+            import chromadb
+
             client = chromadb.PersistentClient(path=self.palace_path)
             col = client.get_collection("mempalace_drawers")
             count = col.count()
