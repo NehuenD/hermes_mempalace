@@ -277,9 +277,9 @@ class TestMempalaceToolDispatch:
         result = provider.handle_tool_call(
             "mempalace_kg_add",
             {
-                "subject": "Kai",
+                "subject": "Alex",
                 "predicate": "works_on",
-                "object": "Orion",
+                "object": "Acme",
             },
         )
         data = json.loads(result)
